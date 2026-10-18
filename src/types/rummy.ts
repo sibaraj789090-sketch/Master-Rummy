@@ -143,6 +143,46 @@ export interface AdminSettings {
   maxDeposit?: number;
 }
 
+export interface BotSettings {
+  enabled: boolean;
+  aiMode: 'MASTER_97' | 'PLAYER_ADVANTAGE_67_78' | 'BALANCED_50' | 'CUSTOM';
+  botWinRatePercent: number; // default 97
+  playerTargetWinRatePercent: number; // default 72
+  turnDelaySeconds: number; // default 1.6
+  smartDiscardEnabled: boolean; // default true
+  smartDrawEnabled: boolean; // default true
+  dropProbabilityPercent: number; // default 8
+  chatFrequencyPercent: number; // default 25
+  fillEmptySeatsInstantly: boolean; // default true
+  forceNextWinner: 'NONE' | 'BOT' | 'PLAYER';
+}
+
+export interface BotProfile {
+  id: string;
+  name: string;
+  username: string;
+  avatar: string;
+  state: string;
+  city: string;
+  vipTier: 'VIP 1' | 'VIP 2' | 'VIP 3' | 'VIP 4' | 'VIP 5' | 'VIP 6' | 'Crown' | 'Master';
+  chips: number;
+  gamesPlayed: number;
+  winRate: number; // e.g. 96.8
+  rating: number; // e.g. 2480
+  badge?: string;
+  isOnline: boolean;
+  playStyle: 'Aggressive' | 'Strategic' | 'Adaptive' | 'Master';
+}
+
+export interface BotSystemStats {
+  totalBotPoolSize: number;
+  activeBotsPlaying: number;
+  totalGamesTracked: number;
+  botWinsCount: number;
+  playerWinsCount: number;
+  totalBotRakeCollected: number;
+}
+
 export interface GameRoom {
   id: string;
   room_code: string;

@@ -24,7 +24,7 @@ export default defineConfig(() => {
     },
     server: {
       host: '0.0.0.0',
-      port: 5000,
+      port: 3000,
       allowedHosts: true as const,
       forwardConsole: false,
       // HMR is disabled in AI Studio via DISABLE_HMR env var.

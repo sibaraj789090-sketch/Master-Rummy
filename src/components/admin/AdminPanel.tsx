@@ -42,7 +42,9 @@ import {
   Activity,
   AlertCircle,
   Sparkles,
+  Cpu,
 } from 'lucide-react';
+import { BotManagementPanel } from './BotManagementPanel';
 import { sounds } from '../../utils/sound';
 import {
   supabase,
@@ -104,7 +106,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onSwitchToPlayer }) => {
 
   // Main Tabs Navigation
   const [activeTab, setActiveTab] = useState<
-    'OVERVIEW' | 'LIVE_GAMES' | 'ADD_CASH' | 'WITHDRAWALS' | 'USERS' | 'KYC_DOCS' | 'SUPABASE' | 'TOURNAMENTS' | 'SETTINGS'
+    'OVERVIEW' | 'BOTS_CONTROL' | 'LIVE_GAMES' | 'ADD_CASH' | 'WITHDRAWALS' | 'USERS' | 'KYC_DOCS' | 'SUPABASE' | 'TOURNAMENTS' | 'SETTINGS'
   >('OVERVIEW');
 
   // Hard gatekeeper for admin permissions
@@ -458,6 +460,24 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onSwitchToPlayer }) => {
         <button
           onClick={() => {
             sounds.playCardClick();
+            setActiveTab('BOTS_CONTROL');
+          }}
+          className={`py-3 px-3.5 flex items-center gap-2 text-xs font-bold transition-colors border-b-2 whitespace-nowrap relative ${
+            activeTab === 'BOTS_CONTROL'
+              ? 'border-purple-400 text-purple-300 bg-purple-950/20'
+              : 'border-transparent text-stone-400 hover:text-stone-200'
+          }`}
+        >
+          <Cpu className="w-4 h-4 text-purple-400" />
+          <span>100k+ Bot Control</span>
+          <span className="bg-purple-500/20 text-purple-300 text-[9px] font-black px-1.5 py-0.2 rounded-full border border-purple-500/40">
+            97% AI
+          </span>
+        </button>
+
+        <button
+          onClick={() => {
+            sounds.playCardClick();
             setActiveTab('LIVE_GAMES');
           }}
           className={`py-3 px-3.5 flex items-center gap-2 text-xs font-bold transition-colors border-b-2 whitespace-nowrap relative ${
@@ -595,6 +615,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onSwitchToPlayer }) => {
 
       {/* Main Content Area */}
       <main className="flex-1 p-4 sm:p-6 max-w-7xl mx-auto w-full space-y-6">
+        {/* ============================================================== */}
+        {/* TAB 0: 100K+ BOTS CONTROL & MATCHMAKING AI */}
+        {/* ============================================================== */}
+        {activeTab === 'BOTS_CONTROL' && <BotManagementPanel />}
+
         {/* ============================================================== */}
         {/* TAB 1: OVERVIEW DASHBOARD */}
         {/* ============================================================== */}

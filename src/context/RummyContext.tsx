@@ -11,7 +11,10 @@ import {
   GameRoom,
   RoomPlayer,
   GameSession,
+  BotSettings,
+  BotSystemStats,
 } from '../types/rummy';
+import { DEFAULT_BOT_SETTINGS, DEFAULT_BOT_STATS } from '../utils/botEngine';
 import { sounds } from '../utils/sound';
 import { triggerWinConfetti } from '../utils/confetti';
 import { getSavedAuthUser, checkIsUserAdmin } from '../lib/supabase';
@@ -93,6 +96,15 @@ interface RummyContextType {
     amount: number;
     description: string;
   }) => void;
+
+  // Bot AI System & 100k+ Bot Pool Control (Admin Hidden)
+  botSettings: BotSettings;
+  botStats: BotSystemStats;
+  updateBotSettings: (updates: Partial<BotSettings>) => void;
+  resetBotSettings: () => void;
+  triggerAdminBotWinOverride: (target: 'BOT' | 'PLAYER' | 'NONE') => void;
+  recordBotGameResult: (winnerIsPlayer: boolean, rakeAmount?: number) => void;
+  simulateBotBatchGames: (count: number) => { botWins: number; playerWins: number; winRate: number };
 }
 
 const RummyContext = createContext<RummyContextType | null>(null);
@@ -645,6 +657,92 @@ export const RummyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [notificationBadgeCount, setNotificationBadgeCount] = useState(1);
   const [unreadBroadcast, setUnreadBroadcast] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
+
+  // Bot AI System & 100k+ Bot Pool State (Admin Controlled)
+  const [botSettings, setBotSettings] = useState<BotSettings>(() => {
+    try {
+      const saved = localStorage.getItem(`${STORAGE_KEY}_bot_settings`);
+      return saved ? JSON.parse(saved) : DEFAULT_BOT_SETTINGS;
+    } catch {
+      return DEFAULT_BOT_SETTINGS;
+    }
+  });
+
+  const [botStats, setBotStats] = useState<BotSystemStats>(() => {
+    try {
+      const saved = localStorage.getItem(`${STORAGE_KEY}_bot_stats`);
+      return saved ? JSON.parse(saved) : DEFAULT_BOT_STATS;
+    } catch {
+      return DEFAULT_BOT_STATS;
+    }
+  });
+
+  const updateBotSettings = (updates: Partial<BotSettings>) => {
+    setBotSettings((prev) => {
+      const next = { ...prev, ...updates };
+      try {
+        localStorage.setItem(`${STORAGE_KEY}_bot_settings`, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
+
+  const resetBotSettings = () => {
+    setBotSettings(DEFAULT_BOT_SETTINGS);
+    try {
+      localStorage.setItem(`${STORAGE_KEY}_bot_settings`, JSON.stringify(DEFAULT_BOT_SETTINGS));
+    } catch {}
+  };
+
+  const triggerAdminBotWinOverride = (target: 'BOT' | 'PLAYER' | 'NONE') => {
+    updateBotSettings({ forceNextWinner: target });
+  };
+
+  const recordBotGameResult = (winnerIsPlayer: boolean, rakeAmount = 0) => {
+    setBotStats((prev) => {
+      const next: BotSystemStats = {
+        ...prev,
+        totalGamesTracked: prev.totalGamesTracked + 1,
+        playerWinsCount: winnerIsPlayer ? prev.playerWinsCount + 1 : prev.playerWinsCount,
+        botWinsCount: !winnerIsPlayer ? prev.botWinsCount + 1 : prev.botWinsCount,
+        totalBotRakeCollected: prev.totalBotRakeCollected + rakeAmount,
+      };
+      try {
+        localStorage.setItem(`${STORAGE_KEY}_bot_stats`, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
+
+  const simulateBotBatchGames = (count: number) => {
+    const targetWinRate = botSettings.botWinRatePercent / 100;
+    let bWins = 0;
+    let pWins = 0;
+    for (let i = 0; i < count; i++) {
+      if (Math.random() < targetWinRate) {
+        bWins++;
+      } else {
+        pWins++;
+      }
+    }
+    setBotStats((prev) => {
+      const next: BotSystemStats = {
+        ...prev,
+        totalGamesTracked: prev.totalGamesTracked + count,
+        botWinsCount: prev.botWinsCount + bWins,
+        playerWinsCount: prev.playerWinsCount + pWins,
+      };
+      try {
+        localStorage.setItem(`${STORAGE_KEY}_bot_stats`, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+    return {
+      botWins: bWins,
+      playerWins: pWins,
+      winRate: Number(((bWins / count) * 100).toFixed(1)),
+    };
+  };
 
   const checkAdminPermissions = async (): Promise<boolean> => {
     const admin = await checkIsUserAdmin();
@@ -1368,6 +1466,13 @@ export const RummyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         adminCreateSponsoredTable,
         adminResetTableStakes,
         adminAddManualTransaction,
+        botSettings,
+        botStats,
+        updateBotSettings,
+        resetBotSettings,
+        triggerAdminBotWinOverride,
+        recordBotGameResult,
+        simulateBotBatchGames,
       }}
     >
       {children}

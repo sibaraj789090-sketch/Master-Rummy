@@ -22,6 +22,13 @@ import {
   GameModeConfig,
   RANKS,
 } from '../../utils/rummyRules';
+import {
+  selectOpponentsForTable,
+  shouldBotTakeDiscardCard,
+  chooseBotOptimalDiscard,
+  shouldBotDeclareWin,
+  getRandomBotChat,
+} from '../../utils/botEngine';
 import { sounds } from '../../utils/sound';
 import { triggerWinConfetti, triggerRoundWinConfetti } from '../../utils/confetti';
 import {
@@ -67,89 +74,24 @@ interface SeatPlayer {
   activeChat?: string | null;
 }
 
-// 2-Player Table Opponent
-const TWO_PLAYER_OPPONENT: SeatPlayer = {
-  id: 'seat_rohotara',
-  name: 'Rohotara',
-  avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=150&q=80',
-  chips: 3000,
-  roundScore: 0,
-  cumulativeScore: 0,
-  dealScores: [],
-  status: 'PLAYING',
-  cardsCount: 13,
-  turnsCount: 0,
-  isDealer: false,
+// Generate realistic human-like opponents dynamically from 100k+ bot pool
+const createTableOpponents = (count: number, variant: string, fee: number): SeatPlayer[] => {
+  const profiles = selectOpponentsForTable(count, variant, fee);
+  return profiles.map((p) => ({
+    id: p.id,
+    name: p.name,
+    avatar: p.avatar,
+    chips: p.chips,
+    roundScore: 0,
+    cumulativeScore: 0,
+    dealScores: [],
+    status: 'PLAYING',
+    cardsCount: 13,
+    turnsCount: 0,
+    isDealer: false,
+    activeChat: null,
+  }));
 };
-
-// 6-Player Table Opponents matching photo
-const SIX_PLAYER_OPPONENTS: SeatPlayer[] = [
-  {
-    id: 'seat_seraj',
-    name: 'Seraj Hus',
-    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
-    chips: 3000,
-    roundScore: 0,
-    cumulativeScore: 0,
-    dealScores: [],
-    status: 'DROPPED',
-    cardsCount: 13,
-    turnsCount: 0,
-    isDealer: false,
-  },
-  {
-    id: 'seat_dk_singh',
-    name: 'DK Singh',
-    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150&q=80',
-    chips: 4000,
-    roundScore: 0,
-    cumulativeScore: 0,
-    dealScores: [],
-    status: 'PLAYING',
-    cardsCount: 13,
-    turnsCount: 0,
-    isDealer: true,
-  },
-  {
-    id: 'seat_kaleem',
-    name: 'Kaleem Ud',
-    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150&q=80',
-    chips: 3500,
-    roundScore: 0,
-    cumulativeScore: 0,
-    dealScores: [],
-    status: 'PLAYING',
-    cardsCount: 13,
-    turnsCount: 0,
-    isDealer: false,
-  },
-  {
-    id: 'seat_naseema',
-    name: 'Naseema S',
-    avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=150&q=80',
-    chips: 4500,
-    roundScore: 0,
-    cumulativeScore: 0,
-    dealScores: [],
-    status: 'PLAYING',
-    cardsCount: 13,
-    turnsCount: 0,
-    isDealer: false,
-  },
-  {
-    id: 'seat_md_shahza',
-    name: 'Md Shahza',
-    avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&q=80',
-    chips: 5000,
-    roundScore: 0,
-    cumulativeScore: 0,
-    dealScores: [],
-    status: 'PLAYING',
-    cardsCount: 13,
-    turnsCount: 0,
-    isDealer: false,
-  },
-];
 
 // Authentic Joker Clown Illustration matching casino rummy cards
 const JokerClownArt: React.FC<{ className?: string }> = ({ className = 'w-full h-full' }) => (
@@ -210,6 +152,9 @@ export const RummyTable: React.FC = () => {
     multiplayerRoom,
     multiplayerPlayer,
     multiplayerSession,
+    botSettings,
+    recordBotGameResult,
+    triggerAdminBotWinOverride,
   } = useRummy();
 
   const isMultiplayer = Boolean(activeGameConfig?.isMultiplayer && multiplayerRoom);
@@ -365,17 +310,13 @@ export const RummyTable: React.FC = () => {
     activeGameConfig?.playersCount === 2 ? 1132717034 : 1132656901
   ).current;
 
-  // Active Seats state
+  // Hidden server-side simulated card hands for each opponent
+  const opponentHandsRef = useRef<Record<string, PlayingCard[]>>({});
+
+  // Active Seats state dynamically generated from 100k+ realistic bot pool
   const [seats, setSeats] = useState<SeatPlayer[]>(() => {
-    const list = activeGameConfig?.playersCount === 2 ? [TWO_PLAYER_OPPONENT] : SIX_PLAYER_OPPONENTS;
-    return list.map((s) => ({
-      ...s,
-      roundScore: 0,
-      cumulativeScore: 0,
-      dealScores: [],
-      turnsCount: 0,
-      status: 'PLAYING',
-    }));
+    const oppCount = activeGameConfig?.playersCount === 2 ? 1 : 5;
+    return createTableOpponents(oppCount, gameVariant, entryFee);
   });
 
   // Calculate current drop penalty for user
@@ -495,9 +436,9 @@ export const RummyTable: React.FC = () => {
     setUserTurnsInRound(0);
     setTurnTimer(30);
 
-    // List of active seated players
-    const activeOpponents = (is2P ? [TWO_PLAYER_OPPONENT] : SIX_PLAYER_OPPONENTS).filter(
-      (s) => s.status !== 'ELIMINATED'
+    // List of active seated players from current table seats
+    const activeOpponents = seats.filter(
+      (s: SeatPlayer) => s.status !== 'ELIMINATED'
     );
 
     const allSeated = [
@@ -507,7 +448,7 @@ export const RummyTable: React.FC = () => {
         playerName: `${currentUser.username} (You)`,
         avatar: currentUser.avatar,
       },
-      ...activeOpponents.map((s, idx) => ({
+      ...activeOpponents.map((s: SeatPlayer, idx: number) => ({
         userId: s.id,
         seatIndex: idx + 1,
         playerName: s.name,
@@ -524,10 +465,12 @@ export const RummyTable: React.FC = () => {
     const isMeDealer = tossResult.dealerSeatIndex === 0;
     setIsUserDealer(isMeDealer);
 
-    // Reset bot statuses and dealer badge for this round
+    // Reset opponent simulated card hands for new round
+    opponentHandsRef.current = {};
+
+    // Reset opponent statuses and dealer badge for this round
     setSeats((prev) => {
-      const baseList = is2P ? [TWO_PLAYER_OPPONENT] : SIX_PLAYER_OPPONENTS;
-      return baseList.map((s, idx) => ({
+      return prev.map((s, idx) => ({
         ...s,
         roundScore: 0,
         turnsCount: 0,
@@ -620,12 +563,20 @@ export const RummyTable: React.FC = () => {
           // Progressively display dealt cards in player hand
           setCardGroups([[...accumulatedUserCards]]);
         } else {
-          // Increment opponent cards count
-          setSeats((prevSeats) =>
-            prevSeats.map((s, idx) =>
-              idx + 1 === step.seatIndex ? { ...s, cardsCount: (s.cardsCount || 0) + 1 } : s
-            )
-          );
+          // Increment opponent cards count & store card in simulated hand
+          const oppIdx = step.seatIndex - 1;
+          setSeats((prevSeats) => {
+            const opp = prevSeats[oppIdx];
+            if (opp) {
+              opponentHandsRef.current[opp.id] = [
+                ...(opponentHandsRef.current[opp.id] || []),
+                step.card,
+              ];
+            }
+            return prevSeats.map((s, idx) =>
+              idx === oppIdx ? { ...s, cardsCount: (s.cardsCount || 0) + 1 } : s
+            );
+          });
         }
 
         // Decrement closed deck count
@@ -682,10 +633,27 @@ export const RummyTable: React.FC = () => {
       return;
     }
 
+    const botHand = opponentHandsRef.current[bot.id] || [];
+    const thinkDelayTime = Math.max(800, (botSettings?.turnDelaySeconds || 1.6) * 1000);
+
     const thinkDelay = setTimeout(() => {
-      sounds.playCardDeal();
+      // 1. DRAW PHASE: Smart pick from open discard pile or closed deck
       let botDrawnCard: PlayingCard;
-      if (closedDeck.length > 0) {
+      const shouldPickOpen =
+        openDiscardPile.length > 0 &&
+        shouldBotTakeDiscardCard(
+          botHand,
+          openDiscardPile[0],
+          wildJokerRank,
+          botSettings?.smartDrawEnabled ?? true
+        );
+
+      if (shouldPickOpen) {
+        sounds.playCardDeal();
+        botDrawnCard = openDiscardPile[0];
+        setOpenDiscardPile((prev) => prev.slice(1));
+      } else if (closedDeck.length > 0) {
+        sounds.playCardDeal();
         botDrawnCard = closedDeck[0];
         setClosedDeck((prev) => prev.slice(1));
       } else {
@@ -698,29 +666,75 @@ export const RummyTable: React.FC = () => {
         };
       }
 
+      const updatedBotHand = [...botHand, botDrawnCard];
+      opponentHandsRef.current[bot.id] = updatedBotHand;
+
+      const newTurnsCount = bot.turnsCount + 1;
       setSeats((prev) =>
-        prev.map((s, idx) => (idx === botIndex ? { ...s, turnsCount: s.turnsCount + 1 } : s))
+        prev.map((s, idx) => (idx === botIndex ? { ...s, turnsCount: newTurnsCount } : s))
       );
 
-      // Bot Discard after 1.5s
-      setTimeout(() => {
-        sounds.playCardClick();
-        setOpenDiscardPile((prev) => [botDrawnCard, ...prev]);
+      // 2. CHECK DECLARE / SHOW CONDITION (Master 97% Bot Win Rate or 67-78% Player Win Rate)
+      const shouldDeclare = shouldBotDeclareWin({
+        botTurnsCount: newTurnsCount,
+        botHand: updatedBotHand,
+        wildJokerRank,
+        botWinRatePercent: botSettings?.botWinRatePercent ?? 97,
+        playerTargetWinRatePercent: botSettings?.playerTargetWinRatePercent ?? 72,
+        aiMode: botSettings?.aiMode ?? 'MASTER_97',
+        forceWinner: botSettings?.forceNextWinner ?? 'NONE',
+      });
 
-        // Occasional chat
-        if (Math.random() < 0.15) {
-          triggerBotChat(
-            botIndex,
-            ['Nice move', 'Good luck', 'Hurry up', 'Play fast'][Math.floor(Math.random() * 4)]
-          );
+      if (shouldDeclare) {
+        setTimeout(() => {
+          showTableToast(`${bot.name} declared a valid Show!`, 'info');
+          sounds.playWinFanfare();
+          recordBotGameResult(false, entryFee * 0.1);
+          if (botSettings?.forceNextWinner !== 'NONE') {
+            triggerAdminBotWinOverride('NONE');
+          }
+          handleConcludeRoundOrDeal(bot.id, false);
+        }, 600);
+        return;
+      }
+
+      // 3. DISCARD PHASE: Optimal Deadwood Discard
+      setTimeout(() => {
+        const discardCard = chooseBotOptimalDiscard(
+          updatedBotHand,
+          wildJokerRank,
+          botSettings?.smartDiscardEnabled ?? true
+        );
+
+        // Update bot's in-memory hand
+        opponentHandsRef.current[bot.id] = updatedBotHand.filter((c) => c.id !== discardCard.id);
+
+        sounds.playCardClick();
+        setOpenDiscardPile((prev) => [discardCard, ...prev]);
+
+        // Occasional authentic in-game chat in Hinglish
+        const chatChance = (botSettings?.chatFrequencyPercent ?? 22) / 100;
+        if (Math.random() < chatChance) {
+          triggerBotChat(botIndex, getRandomBotChat());
         }
 
         advanceTurn();
-      }, 1400);
-    }, 1600);
+      }, 1100);
+    }, thinkDelayTime);
 
     return () => clearTimeout(thinkDelay);
-  }, [currentTurnSeat, gameStarted, playerDropped, winModalData, roundCompleteModalData, seats.length, isMultiplayer]);
+  }, [
+    currentTurnSeat,
+    gameStarted,
+    playerDropped,
+    winModalData,
+    roundCompleteModalData,
+    seats.length,
+    isMultiplayer,
+    openDiscardPile,
+    closedDeck.length,
+    botSettings,
+  ]);
 
   const advanceTurn = () => {
     setHasDrawnCard(false);
@@ -1227,6 +1241,9 @@ export const RummyTable: React.FC = () => {
 
       if (isUserWinner) {
         settleGameWin(settlement.grossWinnings);
+        recordBotGameResult(true, 0);
+      } else {
+        recordBotGameResult(false, settlement.grossWinnings * 0.1);
       }
 
       setWinModalData({
@@ -1296,6 +1313,9 @@ export const RummyTable: React.FC = () => {
 
         if (isMeChampion) {
           settleGameWin(totalPrize);
+          recordBotGameResult(true, 0);
+        } else {
+          recordBotGameResult(false, totalPrize * 0.1);
         }
 
         setWinModalData({
@@ -1385,6 +1405,9 @@ export const RummyTable: React.FC = () => {
 
         if (isMeChampion) {
           settleGameWin(totalPrize);
+          recordBotGameResult(true, 0);
+        } else {
+          recordBotGameResult(false, totalPrize * 0.1);
         }
 
         const sortedStandings = [
