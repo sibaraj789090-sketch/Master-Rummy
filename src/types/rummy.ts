@@ -14,10 +14,32 @@ export type GameCategory = 'CASH' | 'TOURNAMENTS';
 export type CashGameVariant = 'Points' | 'Pool' | 'Deals';
 export type PlayersCount = 2 | 6;
 
+export interface KycDocument {
+  type: 'AADHAAR' | 'PAN';
+  documentNumber: string; // 12-digit Aadhaar or 10-char PAN
+  holderName: string;
+  dob?: string;
+  frontImage?: string; // Data URL or sample image URL
+  backImage?: string;  // Data URL or sample image URL (for Aadhaar)
+  status: 'NOT_SUBMITTED' | 'PENDING' | 'VERIFIED' | 'REJECTED';
+  submittedAt?: string;
+  verifiedAt?: string;
+  rejectionReason?: string;
+}
+
+export interface KycDetails {
+  is18PlusConfirmed: boolean;
+  overallStatus: 'UNVERIFIED' | 'PENDING' | 'VERIFIED' | 'REJECTED';
+  aadhaar: KycDocument;
+  pan: KycDocument;
+}
+
 export interface UserProfile {
   id: string;
   username: string;
   phone: string;
+  whatsappNumber?: string;
+  isWhatsappVerified?: boolean;
   email: string;
   telegram: string;
   dob: string;
@@ -27,7 +49,9 @@ export interface UserProfile {
   withdrawalBalance: number;
   bonusBalance: number;
   practiceChips: number;
+  is18PlusConfirmed?: boolean;
   isKycVerified: boolean;
+  kycDetails?: KycDetails;
   isBanned: boolean;
   referralCode: string;
   referredBy?: string;
@@ -112,6 +136,11 @@ export interface AdminSettings {
   bannerBroadcast: string;
   soundEnabled: boolean;
   maintenanceMode: boolean;
+  adminUpiId?: string;
+  adminMerchantName?: string;
+  adminQrCodeUrl?: string;
+  minDeposit?: number;
+  maxDeposit?: number;
 }
 
 export interface GameRoom {

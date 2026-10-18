@@ -69,10 +69,30 @@ interface RummyContextType {
   adminModifyUserBalance: (userId: string, depositDelta: number, withdrawalDelta: number, bonusDelta: number) => void;
   adminToggleUserBan: (userId: string) => void;
   adminVerifyKyc: (userId: string) => void;
+  submitKycDocument: (doc: {
+    type: 'AADHAAR' | 'PAN';
+    documentNumber: string;
+    holderName: string;
+    dob?: string;
+    frontImage?: string;
+    backImage?: string;
+  }) => { success: boolean; message: string };
+  adminApproveKycDoc: (userId: string, docType: 'AADHAAR' | 'PAN' | 'ALL') => void;
+  adminRejectKycDoc: (userId: string, docType: 'AADHAAR' | 'PAN', reason: string) => void;
   adminCreateTournament: (tournament: Omit<Tournament, 'id' | 'joinedCount' | 'registeredUserIds'>) => void;
   adminUpdateSettings: (settings: Partial<AdminSettings>) => void;
   adminSendBroadcast: (message: string) => void;
   adminAddCoupon: (coupon: Coupon) => void;
+  activeLiveTables: import('../types/rummy').ActiveGameTable[];
+  adminTerminateLiveTable: (tableId: string) => void;
+  adminCreateSponsoredTable: (table: Omit<import('../types/rummy').ActiveGameTable, 'id' | 'currentPlayers' | 'status'>) => void;
+  adminResetTableStakes: (tableId: string, pointValue: number, entryFee: number) => void;
+  adminAddManualTransaction: (params: {
+    userId: string;
+    type: 'DEPOSIT' | 'WITHDRAWAL' | 'BONUS' | 'PRACTICE_CHIPS';
+    amount: number;
+    description: string;
+  }) => void;
 }
 
 const RummyContext = createContext<RummyContextType | null>(null);
@@ -83,9 +103,12 @@ const DEFAULT_USER: UserProfile = {
   id: '19098975',
   username: 'player35150',
   phone: '8438242692',
+  whatsappNumber: '8438242692',
+  isWhatsappVerified: true,
+  is18PlusConfirmed: true,
   email: '',
   telegram: '',
-  dob: '',
+  dob: '2001-05-14',
   gender: 'Male',
   avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80',
   depositBalance: 1500.0,
@@ -93,6 +116,30 @@ const DEFAULT_USER: UserProfile = {
   bonusBalance: 500.0,
   practiceChips: 10000,
   isKycVerified: true,
+  kycDetails: {
+    is18PlusConfirmed: true,
+    overallStatus: 'VERIFIED',
+    aadhaar: {
+      type: 'AADHAAR',
+      documentNumber: '8492-3847-1920',
+      holderName: 'Player 35150',
+      dob: '2001-05-14',
+      status: 'VERIFIED',
+      submittedAt: '2026-10-10',
+      verifiedAt: '2026-10-10',
+      frontImage: 'https://images.unsplash.com/photo-1589829545856-d10d557cf95f?auto=format&fit=crop&w=600&q=80',
+    },
+    pan: {
+      type: 'PAN',
+      documentNumber: 'ABCDE1234F',
+      holderName: 'Player 35150',
+      dob: '2001-05-14',
+      status: 'VERIFIED',
+      submittedAt: '2026-10-10',
+      verifiedAt: '2026-10-10',
+      frontImage: 'https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?auto=format&fit=crop&w=600&q=80',
+    },
+  },
   isBanned: false,
   referralCode: 'MR35150',
   createdAt: '2026-10-10',
@@ -104,6 +151,9 @@ const INITIAL_USERS: UserProfile[] = [
     id: '1000001',
     username: 'SufiyanZ***',
     phone: '9876543210',
+    whatsappNumber: '9876543210',
+    isWhatsappVerified: true,
+    is18PlusConfirmed: true,
     email: 'sufiyan@example.com',
     telegram: '@sufiyan_pro',
     dob: '1995-04-12',
@@ -114,6 +164,28 @@ const INITIAL_USERS: UserProfile[] = [
     bonusBalance: 1760000,
     practiceChips: 50000,
     isKycVerified: true,
+    kycDetails: {
+      is18PlusConfirmed: true,
+      overallStatus: 'VERIFIED',
+      aadhaar: {
+        type: 'AADHAAR',
+        documentNumber: '4928-1092-3841',
+        holderName: 'Sufiyan Z',
+        dob: '1995-04-12',
+        status: 'VERIFIED',
+        submittedAt: '2026-01-15',
+        verifiedAt: '2026-01-16',
+      },
+      pan: {
+        type: 'PAN',
+        documentNumber: 'SUFYZ1234K',
+        holderName: 'Sufiyan Z',
+        dob: '1995-04-12',
+        status: 'VERIFIED',
+        submittedAt: '2026-01-15',
+        verifiedAt: '2026-01-16',
+      },
+    },
     isBanned: false,
     referralCode: 'SUF999',
     createdAt: '2026-01-15',
@@ -122,6 +194,9 @@ const INITIAL_USERS: UserProfile[] = [
     id: '1000002',
     username: 'AjayMaha***',
     phone: '9811223344',
+    whatsappNumber: '9811223344',
+    isWhatsappVerified: true,
+    is18PlusConfirmed: true,
     email: 'ajay@example.com',
     telegram: '',
     dob: '1992-08-20',
@@ -131,7 +206,29 @@ const INITIAL_USERS: UserProfile[] = [
     withdrawalBalance: 10193000,
     bonusBalance: 978000,
     practiceChips: 25000,
-    isKycVerified: true,
+    isKycVerified: false,
+    kycDetails: {
+      is18PlusConfirmed: true,
+      overallStatus: 'PENDING',
+      aadhaar: {
+        type: 'AADHAAR',
+        documentNumber: '7182-9381-0021',
+        holderName: 'Ajay Mahajan',
+        dob: '1992-08-20',
+        status: 'PENDING',
+        submittedAt: '2026-10-17',
+        frontImage: 'https://images.unsplash.com/photo-1589829545856-d10d557cf95f?auto=format&fit=crop&w=600&q=80',
+      },
+      pan: {
+        type: 'PAN',
+        documentNumber: 'AJAYM5678P',
+        holderName: 'Ajay Mahajan',
+        dob: '1992-08-20',
+        status: 'PENDING',
+        submittedAt: '2026-10-17',
+        frontImage: 'https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?auto=format&fit=crop&w=600&q=80',
+      },
+    },
     isBanned: false,
     referralCode: 'AJAY77',
     createdAt: '2026-02-10',
@@ -441,7 +538,102 @@ export const RummyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     bannerBroadcast: 'BUY 1 GET 3: Recharge once and get instant extra 2-day cash rewards!',
     soundEnabled: true,
     maintenanceMode: false,
+    adminUpiId: 'masterrummy@okaxis',
+    adminMerchantName: 'Master Rummy Online (Gaming Ops)',
+    adminQrCodeUrl: 'https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=upi://pay?pa=masterrummy@okaxis&pn=MasterRummy&cu=INR',
+    minDeposit: 100,
+    maxDeposit: 50000,
   });
+
+  const [activeLiveTables, setActiveLiveTables] = useState<import('../types/rummy').ActiveGameTable[]>([
+    {
+      id: 'tbl_pt_2p_rapid',
+      name: 'Rapid Points 2P Cash',
+      category: 'CASH',
+      variant: 'Points',
+      playersCount: 2,
+      pointValue: 0.1,
+      entryFee: 8,
+      prizePool: 15.52,
+      status: 'IN_PLAY',
+      currentPlayers: 2,
+      gameTypeDetail: 'Classic',
+    },
+    {
+      id: 'tbl_pt_6p_classic',
+      name: 'Classic Points 6-Max',
+      category: 'CASH',
+      variant: 'Points',
+      playersCount: 6,
+      pointValue: 0.5,
+      entryFee: 40,
+      prizePool: 232.8,
+      status: 'IN_PLAY',
+      currentPlayers: 6,
+      gameTypeDetail: 'Classic',
+    },
+    {
+      id: 'tbl_pool_101',
+      name: '101 Pool Elimination Table',
+      category: 'CASH',
+      variant: 'Pool',
+      playersCount: 6,
+      entryFee: 50,
+      prizePool: 291.0,
+      status: 'IN_PLAY',
+      currentPlayers: 5,
+      gameTypeDetail: '101',
+    },
+    {
+      id: 'tbl_pool_201',
+      name: '201 Pool Marathon Arena',
+      category: 'CASH',
+      variant: 'Pool',
+      playersCount: 6,
+      entryFee: 100,
+      prizePool: 582.0,
+      status: 'WAITING',
+      currentPlayers: 3,
+      gameTypeDetail: '201',
+    },
+    {
+      id: 'tbl_deals_2',
+      name: '2-Deals Best of Two',
+      category: 'CASH',
+      variant: 'Deals',
+      playersCount: 2,
+      entryFee: 25,
+      prizePool: 48.5,
+      status: 'IN_PLAY',
+      currentPlayers: 2,
+      gameTypeDetail: '2',
+    },
+    {
+      id: 'tbl_deals_3',
+      name: '3-Deals Grand Series',
+      category: 'CASH',
+      variant: 'Deals',
+      playersCount: 6,
+      entryFee: 75,
+      prizePool: 436.5,
+      status: 'WAITING',
+      currentPlayers: 4,
+      gameTypeDetail: '3',
+    },
+    {
+      id: 'tbl_high_stakes',
+      name: 'VIP High Roller Points Rummy',
+      category: 'CASH',
+      variant: 'Points',
+      playersCount: 2,
+      pointValue: 2.0,
+      entryFee: 160,
+      prizePool: 310.4,
+      status: 'IN_PLAY',
+      currentPlayers: 2,
+      gameTypeDetail: 'VIP',
+    },
+  ]);
 
   const [soundEnabled, setSoundEnabledState] = useState(true);
   const [activeScreen, setActiveScreen] = useState<'LOBBY' | 'CHALLENGER' | 'TOURNAMENTS' | 'REFER_EARN' | 'WALLET' | 'WITHDRAW' | 'ADD_CASH' | 'GAME_TABLE'>('LOBBY');
@@ -570,6 +762,14 @@ export const RummyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // Request Withdrawal
   const requestWithdrawal = (amount: number, bankAccount: BankAccount) => {
+    const isKycApproved = currentUser.isKycVerified || currentUser.kycDetails?.overallStatus === 'VERIFIED';
+    if (!isKycApproved) {
+      return {
+        success: false,
+        message: 'Strict 18+ KYC Required: You must complete and have your Aadhaar Card & PAN Card approved before requesting withdrawals.',
+      };
+    }
+
     if (amount < adminSettings.minWithdrawal) {
       return { success: false, message: `Minimum withdrawal amount is ₹${adminSettings.minWithdrawal}` };
     }
@@ -877,14 +1077,140 @@ export const RummyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     );
   };
 
-  const adminVerifyKyc = (userId: string) => {
-    sounds.playBell();
+  const submitKycDocument = (doc: {
+    type: 'AADHAAR' | 'PAN';
+    documentNumber: string;
+    holderName: string;
+    dob?: string;
+    frontImage?: string;
+    backImage?: string;
+  }) => {
+    sounds.playCoinSound();
+    const now = new Date().toISOString().split('T')[0];
+
+    const fallbackDoc = (type: 'AADHAAR' | 'PAN'): import('../types/rummy').KycDocument => ({
+      type,
+      documentNumber: '',
+      holderName: '',
+      status: 'NOT_SUBMITTED',
+    });
+
+    setCurrentUser((prev) => {
+      const existingKyc = prev.kycDetails || {
+        is18PlusConfirmed: true,
+        overallStatus: 'UNVERIFIED' as const,
+        aadhaar: fallbackDoc('AADHAAR'),
+        pan: fallbackDoc('PAN'),
+      };
+
+      const updatedDoc: import('../types/rummy').KycDocument = {
+        ...doc,
+        status: 'PENDING',
+        submittedAt: now,
+      };
+
+      const newAadhaar = doc.type === 'AADHAAR' ? updatedDoc : existingKyc.aadhaar;
+      const newPan = doc.type === 'PAN' ? updatedDoc : existingKyc.pan;
+
+      const isBothVerified = newAadhaar.status === 'VERIFIED' && newPan.status === 'VERIFIED';
+      const overallStatus = isBothVerified ? 'VERIFIED' : 'PENDING';
+
+      const updatedUser: UserProfile = {
+        ...prev,
+        is18PlusConfirmed: true,
+        isKycVerified: isBothVerified,
+        kycDetails: {
+          is18PlusConfirmed: true,
+          overallStatus,
+          aadhaar: newAadhaar,
+          pan: newPan,
+        },
+      };
+
+      setAllUsers((users) => users.map((u) => (u.id === prev.id ? updatedUser : u)));
+      return updatedUser;
+    });
+
+    return {
+      success: true,
+      message: `${doc.type === 'AADHAAR' ? 'Aadhaar Card' : 'PAN Card'} submitted successfully! Verification under review.`,
+    };
+  };
+
+  const adminApproveKycDoc = (userId: string, docType: 'AADHAAR' | 'PAN' | 'ALL') => {
+    sounds.playWinFanfare();
+    const now = new Date().toISOString().split('T')[0];
+
+    const updateUserKyc = (u: UserProfile): UserProfile => {
+      const kyc = u.kycDetails || {
+        is18PlusConfirmed: true,
+        overallStatus: 'UNVERIFIED' as const,
+        aadhaar: { type: 'AADHAAR', documentNumber: '8492-3847-1920', holderName: u.username, status: 'PENDING' },
+        pan: { type: 'PAN', documentNumber: 'ABCDE1234F', holderName: u.username, status: 'PENDING' },
+      };
+
+      const newAadhaar =
+        docType === 'AADHAAR' || docType === 'ALL'
+          ? { ...kyc.aadhaar, status: 'VERIFIED' as const, verifiedAt: now }
+          : kyc.aadhaar;
+
+      const newPan =
+        docType === 'PAN' || docType === 'ALL'
+          ? { ...kyc.pan, status: 'VERIFIED' as const, verifiedAt: now }
+          : kyc.pan;
+
+      const isBoth = newAadhaar.status === 'VERIFIED' && newPan.status === 'VERIFIED';
+
+      return {
+        ...u,
+        is18PlusConfirmed: true,
+        isKycVerified: isBoth,
+        kycDetails: {
+          is18PlusConfirmed: true,
+          overallStatus: isBoth ? 'VERIFIED' : 'PENDING',
+          aadhaar: newAadhaar,
+          pan: newPan,
+        },
+      };
+    };
+
     if (userId === currentUser.id) {
-      setCurrentUser((prev) => ({ ...prev, isKycVerified: true }));
+      setCurrentUser((prev) => updateUserKyc(prev));
     }
-    setAllUsers((users) =>
-      users.map((u) => (u.id === userId ? { ...u, isKycVerified: true } : u))
-    );
+    setAllUsers((users) => users.map((u) => (u.id === userId ? updateUserKyc(u) : u)));
+  };
+
+  const adminRejectKycDoc = (userId: string, docType: 'AADHAAR' | 'PAN', reason: string) => {
+    sounds.playBell();
+
+    const updateUserKyc = (u: UserProfile): UserProfile => {
+      if (!u.kycDetails) return u;
+      return {
+        ...u,
+        isKycVerified: false,
+        kycDetails: {
+          ...u.kycDetails,
+          overallStatus: 'REJECTED',
+          aadhaar:
+            docType === 'AADHAAR'
+              ? { ...u.kycDetails.aadhaar, status: 'REJECTED', rejectionReason: reason }
+              : u.kycDetails.aadhaar,
+          pan:
+            docType === 'PAN'
+              ? { ...u.kycDetails.pan, status: 'REJECTED', rejectionReason: reason }
+              : u.kycDetails.pan,
+        },
+      };
+    };
+
+    if (userId === currentUser.id) {
+      setCurrentUser((prev) => updateUserKyc(prev));
+    }
+    setAllUsers((users) => users.map((u) => (u.id === userId ? updateUserKyc(u) : u)));
+  };
+
+  const adminVerifyKyc = (userId: string) => {
+    adminApproveKycDoc(userId, 'ALL');
   };
 
   const adminCreateTournament = (tournamentData: Omit<Tournament, 'id' | 'joinedCount' | 'registeredUserIds'>) => {
@@ -912,6 +1238,84 @@ export const RummyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const adminAddCoupon = (coupon: Coupon) => {
     sounds.playCoinSound();
     setCoupons((prev) => [coupon, ...prev]);
+  };
+
+  const adminTerminateLiveTable = (tableId: string) => {
+    sounds.playBell();
+    setActiveLiveTables((prev) =>
+      prev.map((t) => (t.id === tableId ? { ...t, status: 'FINISHED' as const, currentPlayers: 0 } : t))
+    );
+  };
+
+  const adminCreateSponsoredTable = (table: Omit<import('../types/rummy').ActiveGameTable, 'id' | 'currentPlayers' | 'status'>) => {
+    sounds.playWinFanfare();
+    const newTable: import('../types/rummy').ActiveGameTable = {
+      ...table,
+      id: `table_sponsored_${Date.now()}`,
+      status: 'WAITING',
+      currentPlayers: 1,
+    };
+    setActiveLiveTables((prev) => [newTable, ...prev]);
+  };
+
+  const adminResetTableStakes = (tableId: string, pointValue: number, entryFee: number) => {
+    sounds.playCoinSound();
+    setActiveLiveTables((prev) =>
+      prev.map((t) => (t.id === tableId ? { ...t, pointValue, entryFee } : t))
+    );
+  };
+
+  const adminAddManualTransaction = (params: {
+    userId: string;
+    type: 'DEPOSIT' | 'WITHDRAWAL' | 'BONUS' | 'PRACTICE_CHIPS';
+    amount: number;
+    description: string;
+  }) => {
+    sounds.playCoinSound();
+    const { userId, type, amount, description } = params;
+
+    let targetUserDep = 0;
+    let targetUserWdl = 0;
+
+    const updateUser = (u: UserProfile): UserProfile => {
+      let dep = u.depositBalance;
+      let wdl = u.withdrawalBalance;
+      let bon = u.bonusBalance;
+      let chips = u.practiceChips;
+
+      if (type === 'DEPOSIT') dep = Math.max(0, Number((dep + amount).toFixed(2)));
+      else if (type === 'WITHDRAWAL') wdl = Math.max(0, Number((wdl + amount).toFixed(2)));
+      else if (type === 'BONUS') bon = Math.max(0, Number((bon + amount).toFixed(2)));
+      else if (type === 'PRACTICE_CHIPS') chips = Math.max(0, Math.round(chips + amount));
+
+      targetUserDep = dep;
+      targetUserWdl = wdl;
+
+      return {
+        ...u,
+        depositBalance: dep,
+        withdrawalBalance: wdl,
+        bonusBalance: bon,
+        practiceChips: chips,
+      };
+    };
+
+    if (userId === currentUser.id) {
+      setCurrentUser(updateUser);
+    }
+    setAllUsers((users) => users.map((u) => (u.id === userId ? updateUser(u) : u)));
+
+    const newTx: Transaction = {
+      id: `tx_admin_${Date.now()}`,
+      userId,
+      type: type === 'PRACTICE_CHIPS' || type === 'BONUS' ? 'COUPON_BONUS' : type,
+      amount: Math.abs(amount),
+      status: 'SUCCESS',
+      description: `Admin Adjust: ${description} (${amount >= 0 ? '+' : '-'}₹${Math.abs(amount)})`,
+      timestamp: new Date().toLocaleString(),
+      balanceAfter: targetUserDep + targetUserWdl,
+    };
+    setTransactions((prev) => [newTx, ...prev]);
   };
 
   return (
@@ -952,10 +1356,18 @@ export const RummyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         adminModifyUserBalance,
         adminToggleUserBan,
         adminVerifyKyc,
+        submitKycDocument,
+        adminApproveKycDoc,
+        adminRejectKycDoc,
         adminCreateTournament,
         adminUpdateSettings,
         adminSendBroadcast,
         adminAddCoupon,
+        activeLiveTables,
+        adminTerminateLiveTable,
+        adminCreateSponsoredTable,
+        adminResetTableStakes,
+        adminAddManualTransaction,
       }}
     >
       {children}

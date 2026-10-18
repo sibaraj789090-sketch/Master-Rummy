@@ -19,7 +19,6 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
 }) => {
   const { currentUser, setActiveScreen, notificationBadgeCount, unreadBroadcast, dismissBroadcast } = useRummy();
   const [showBalanceDropdown, setShowBalanceDropdown] = useState(false);
-  const supabaseCfg = getSupabaseConfig();
 
   return (
     <div className="relative z-30">
@@ -70,11 +69,16 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
           </div>
 
           <div className="flex flex-col">
-            <span className="text-xs font-bold tracking-tight text-white/95 truncate max-w-[85px]">
-              {currentUser.username}
-            </span>
+            <div className="flex items-center gap-1">
+              <span className="text-xs font-bold tracking-tight text-white/95 truncate max-w-[75px]">
+                {currentUser.username}
+              </span>
+              <span className="bg-red-700 text-white font-black text-[8px] px-1 py-0.2 rounded shrink-0">
+                18+
+              </span>
+            </div>
             <div className="flex items-center gap-1 text-[9px] text-amber-300 font-medium">
-              <span>Online</span>
+              <span>{currentUser.isKycVerified ? 'KYC Verified' : 'Online'}</span>
             </div>
           </div>
         </div>
@@ -165,26 +169,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
             <span>ADD CASH</span>
           </button>
 
-          {/* Supabase Multiplayer Indicator */}
-          {onOpenSupabaseSetup && (
-            <button
-              onClick={() => {
-                sounds.playCardClick();
-                onOpenSupabaseSetup();
-              }}
-              title="Supabase Multiplayer Backend"
-              className={`flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-black border transition-all ${
-                supabaseCfg.isConfigured
-                  ? 'bg-emerald-950/80 border-emerald-500/60 text-emerald-300 shadow-sm'
-                  : 'bg-amber-950/80 border-amber-500/60 text-amber-300 animate-pulse'
-              }`}
-            >
-              <Database className="w-3 h-3" />
-              <span className="hidden xs:inline">
-                {supabaseCfg.isConfigured ? 'Supabase' : 'Setup DB'}
-              </span>
-            </button>
-          )}
+
 
           {/* Install / Download App Button */}
           {onOpenInstall && (

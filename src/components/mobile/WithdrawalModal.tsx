@@ -7,9 +7,15 @@ interface WithdrawalModalProps {
   isOpen: boolean;
   onClose: () => void;
   onOpenSupport: () => void;
+  onOpenDocumentsVerification?: () => void;
 }
 
-export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({ isOpen, onClose, onOpenSupport }) => {
+export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
+  isOpen,
+  onClose,
+  onOpenSupport,
+  onOpenDocumentsVerification,
+}) => {
   const { currentUser, requestWithdrawal, withdrawalRequests, adminSettings } = useRummy();
 
   const [activeTab, setActiveTab] = useState<'REQUEST' | 'HISTORY'>('REQUEST');
@@ -29,6 +35,8 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({ isOpen, onClos
 
   if (!isOpen) return null;
 
+  const isKycApproved = currentUser.isKycVerified || currentUser.kycDetails?.overallStatus === 'VERIFIED';
+
   const tds = Math.round(selectedAmount * 0.05);
   const netAmount = selectedAmount - tds;
 
@@ -36,6 +44,11 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({ isOpen, onClos
     sounds.playCoinSound();
     setErrorMessage('');
     setSuccessMessage('');
+
+    if (!isKycApproved) {
+      setErrorMessage('⚠️ 18+ Documents Verification Required! You must upload and verify your Aadhaar Card & PAN Card before withdrawing.');
+      return;
+    }
 
     if (!accountNumber || !ifsc || !accountHolder) {
       setErrorMessage('Please fill in complete bank account details');
@@ -126,6 +139,55 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({ isOpen, onClos
                 ₹{currentUser.withdrawalBalance.toFixed(2)}
               </span>
             </div>
+
+            {/* 18+ Documents & KYC Status Banner */}
+            {!isKycApproved ? (
+              <div className="bg-amber-50 border border-amber-300 rounded-xl p-3 flex items-start justify-between gap-2.5 shadow-xs">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="bg-red-700 text-white font-black text-[9px] px-1 py-0.2 rounded">18+</span>
+                      <span className="font-black text-xs text-amber-900">Aadhaar & PAN Verification Required</span>
+                    </div>
+                    <p className="text-[11px] text-amber-800 mt-0.5 leading-snug">
+                      Government guidelines require 18+ Aadhaar & PAN Card verification to withdraw cash.
+                    </p>
+                  </div>
+                </div>
+                {onOpenDocumentsVerification && (
+                  <button
+                    onClick={() => {
+                      sounds.playCardClick();
+                      onOpenDocumentsVerification();
+                    }}
+                    className="shrink-0 bg-red-700 hover:bg-red-800 text-white text-[10px] font-black px-2.5 py-1.5 rounded-lg uppercase shadow-xs transition-colors"
+                  >
+                    Upload Now ›
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="bg-emerald-50 border border-emerald-300 rounded-xl p-2.5 flex items-center justify-between shadow-xs">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                  <span className="text-xs font-bold text-emerald-900">
+                    18+ KYC Documents Verified (Aadhaar & PAN Approved)
+                  </span>
+                </div>
+                {onOpenDocumentsVerification && (
+                  <button
+                    onClick={() => {
+                      sounds.playCardClick();
+                      onOpenDocumentsVerification();
+                    }}
+                    className="text-[10px] font-bold text-emerald-700 hover:underline"
+                  >
+                    View Docs
+                  </button>
+                )}
+              </div>
+            )}
 
             {/* Quick Amounts 2-Column Grid (From Screenshot 4) */}
             <div className="grid grid-cols-2 gap-2.5">
@@ -248,16 +310,35 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({ isOpen, onClos
 
           {/* Action button & Footer (From Screenshot 4) */}
           <div className="mt-8 pt-4 border-t border-slate-200 text-center">
-            <button
-              onClick={handleWithdraw}
-              className="w-full py-3.5 bg-gradient-to-b from-[#22c55e] to-[#15803d] hover:from-[#16a34a] hover:to-[#166534] text-white font-black text-base tracking-wider rounded-xl shadow-lg active:scale-95 transition-all uppercase"
-            >
-              CONTINUE
-            </button>
+            {!isKycApproved ? (
+              <button
+                type="button"
+                onClick={() => {
+                  sounds.playCardClick();
+                  if (onOpenDocumentsVerification) {
+                    onOpenDocumentsVerification();
+                  } else {
+                    setErrorMessage('⚠️ 18+ Documents Verification Required! Upload Aadhaar & PAN Card before withdrawing.');
+                  }
+                }}
+                className="w-full py-3.5 bg-gradient-to-r from-red-600 via-rose-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white font-black text-xs sm:text-sm tracking-wide rounded-xl shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2 uppercase"
+              >
+                <ShieldCheck className="w-5 h-5 shrink-0" />
+                <span>COMPLETE 18+ KYC TO UNLOCK WITHDRAWAL</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleWithdraw}
+                className="w-full py-3.5 bg-gradient-to-b from-[#22c55e] to-[#15803d] hover:from-[#16a34a] hover:to-[#166534] text-white font-black text-base tracking-wider rounded-xl shadow-lg active:scale-95 transition-all uppercase"
+              >
+                CONTINUE
+              </button>
+            )}
 
             <div className="flex items-center justify-center gap-1.5 text-xs text-slate-400 font-medium mt-3">
               <ShieldCheck className="w-4 h-4 text-emerald-600" />
-              <span>100% safe and secure</span>
+              <span>100% safe, verified & secure</span>
             </div>
           </div>
         </div>

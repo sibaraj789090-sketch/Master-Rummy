@@ -24,6 +24,7 @@ interface MyWalletModalProps {
   onOpenAddCash: () => void;
   onOpenWithdrawal: () => void;
   onOpenTransactions: () => void;
+  onOpenDocumentsVerification?: () => void;
 }
 
 export const MyWalletModal: React.FC<MyWalletModalProps> = ({
@@ -32,6 +33,7 @@ export const MyWalletModal: React.FC<MyWalletModalProps> = ({
   onOpenAddCash,
   onOpenWithdrawal,
   onOpenTransactions,
+  onOpenDocumentsVerification,
 }) => {
   const { currentUser, updateCurrentUserProfile } = useRummy();
 
@@ -201,6 +203,65 @@ export const MyWalletModal: React.FC<MyWalletModalProps> = ({
           <h3 className="font-extrabold text-xs text-slate-700 uppercase tracking-wide mb-2">Personal Information</h3>
 
           <div className="bg-white border border-slate-200 rounded-xl divide-y divide-slate-100 shadow-xs text-xs">
+            {/* 18+ KYC Documents Verification Row */}
+            <div className="p-3 flex items-center justify-between bg-amber-50/50">
+              <div className="flex items-center gap-2.5">
+                <ShieldCheck className="w-4 h-4 text-amber-600" />
+                <div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="bg-red-700 text-white font-black text-[9px] px-1 py-0.2 rounded">18+</span>
+                    <span className="text-slate-800 font-bold">KYC Documents (Aadhaar & PAN)</span>
+                    <span
+                      className={`text-[10px] font-black px-1.5 py-0.2 rounded ${
+                        currentUser.isKycVerified || currentUser.kycDetails?.overallStatus === 'VERIFIED'
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : 'bg-amber-100 text-amber-800'
+                      }`}
+                    >
+                      {currentUser.isKycVerified || currentUser.kycDetails?.overallStatus === 'VERIFIED'
+                        ? 'Approved'
+                        : 'Action Required'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Aadhaar: {currentUser.kycDetails?.aadhaar?.status || (currentUser.isKycVerified ? 'VERIFIED' : 'Pending')} · PAN: {currentUser.kycDetails?.pan?.status || (currentUser.isKycVerified ? 'VERIFIED' : 'Pending')}
+                  </p>
+                </div>
+              </div>
+              {onOpenDocumentsVerification && (
+                <button
+                  onClick={() => {
+                    sounds.playCardClick();
+                    onClose();
+                    onOpenDocumentsVerification();
+                  }}
+                  className="text-[11px] font-black text-red-700 hover:underline"
+                >
+                  UPLOAD / VIEW ›
+                </button>
+              )}
+            </div>
+
+            {/* WhatsApp Number */}
+            <div className="p-3 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <span className="w-4 h-4 rounded-full bg-[#25D366] text-white flex items-center justify-center font-bold text-[8px]">
+                  WA
+                </span>
+                <div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-slate-600 font-medium">WhatsApp Number</span>
+                    <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-1.5 py-0.2 rounded">
+                      OTP Verified
+                    </span>
+                  </div>
+                  <p className="font-bold text-slate-900 mt-0.5">
+                    +91 {currentUser.whatsappNumber || currentUser.phone}
+                  </p>
+                </div>
+              </div>
+            </div>
+
             {/* Mobile Number */}
             <div className="p-3 flex items-center justify-between">
               <div className="flex items-center gap-2.5">

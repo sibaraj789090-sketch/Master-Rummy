@@ -16,6 +16,7 @@ import { LoginModal } from './components/mobile/LoginModal';
 import { InstallAppModal } from './components/mobile/InstallAppModal';
 import { AppLoadingScreen } from './components/mobile/AppLoadingScreen';
 import { SupabaseSetupModal } from './components/mobile/SupabaseSetupModal';
+import { DocumentsVerificationModal } from './components/mobile/DocumentsVerificationModal';
 import { RummyTable } from './components/game/RummyTable';
 import { AdminPanel } from './components/admin/AdminPanel';
 import { sounds } from './utils/sound';
@@ -40,6 +41,7 @@ const MainApp: React.FC = () => {
   const [isLoginOpen, setIsLoginOpen] = useState(false);
   const [isInstallOpen, setIsInstallOpen] = useState(false);
   const [isSupabaseSetupOpen, setIsSupabaseSetupOpen] = useState(false);
+  const [isDocumentsVerificationOpen, setIsDocumentsVerificationOpen] = useState(false);
 
   // If in Admin Mode, show Admin Panel
   if (viewMode === 'ADMIN') {
@@ -97,69 +99,79 @@ const MainApp: React.FC = () => {
           onOpenInstall={() => setIsInstallOpen(true)}
           onOpenLoadingScreen={() => setIsLoadingScreen(true)}
           onOpenSupabaseSetup={() => setIsSupabaseSetupOpen(true)}
+          onOpenDocumentsVerification={() => setIsDocumentsVerificationOpen(true)}
         />
 
         <AddCashModal
           isOpen={isAddCashOpen || activeScreen === 'ADD_CASH'}
-            onClose={() => {
-              setIsAddCashOpen(false);
-              if (activeScreen === 'ADD_CASH') setActiveScreen('LOBBY');
-            }}
-            onOpenSupport={() => setIsSupportOpen(true)}
-          />
+          onClose={() => {
+            setIsAddCashOpen(false);
+            if (activeScreen === 'ADD_CASH') setActiveScreen('LOBBY');
+          }}
+          onOpenSupport={() => setIsSupportOpen(true)}
+        />
 
-          <WithdrawalModal
-            isOpen={isWithdrawalOpen || activeScreen === 'WITHDRAW'}
-            onClose={() => {
-              setIsWithdrawalOpen(false);
-              if (activeScreen === 'WITHDRAW') setActiveScreen('LOBBY');
-            }}
-            onOpenSupport={() => setIsSupportOpen(true)}
-          />
+        <WithdrawalModal
+          isOpen={isWithdrawalOpen || activeScreen === 'WITHDRAW'}
+          onClose={() => {
+            setIsWithdrawalOpen(false);
+            if (activeScreen === 'WITHDRAW') setActiveScreen('LOBBY');
+          }}
+          onOpenSupport={() => setIsSupportOpen(true)}
+          onOpenDocumentsVerification={() => setIsDocumentsVerificationOpen(true)}
+        />
 
-          <MyWalletModal
-            isOpen={isWalletOpen || activeScreen === 'WALLET'}
-            onClose={() => {
-              setIsWalletOpen(false);
-              if (activeScreen === 'WALLET') setActiveScreen('LOBBY');
-            }}
-            onOpenAddCash={() => setIsAddCashOpen(true)}
-            onOpenWithdrawal={() => setIsWithdrawalOpen(true)}
-            onOpenTransactions={() => setIsTransactionsOpen(true)}
-          />
+        <MyWalletModal
+          isOpen={isWalletOpen || activeScreen === 'WALLET'}
+          onClose={() => {
+            setIsWalletOpen(false);
+            if (activeScreen === 'WALLET') setActiveScreen('LOBBY');
+          }}
+          onOpenAddCash={() => setIsAddCashOpen(true)}
+          onOpenWithdrawal={() => setIsWithdrawalOpen(true)}
+          onOpenTransactions={() => setIsTransactionsOpen(true)}
+          onOpenDocumentsVerification={() => setIsDocumentsVerificationOpen(true)}
+        />
 
-          <TransactionsModal
-            isOpen={isTransactionsOpen}
-            onClose={() => setIsTransactionsOpen(false)}
-          />
+        <TransactionsModal
+          isOpen={isTransactionsOpen}
+          onClose={() => setIsTransactionsOpen(false)}
+        />
 
-          <HelpSupportModal
-            isOpen={isSupportOpen}
-            onClose={() => setIsSupportOpen(false)}
-          />
+        <HelpSupportModal
+          isOpen={isSupportOpen}
+          onClose={() => setIsSupportOpen(false)}
+        />
 
-          <NotificationsModal
-            isOpen={isNotificationsOpen}
-            onClose={() => setIsNotificationsOpen(false)}
-          />
+        <NotificationsModal
+          isOpen={isNotificationsOpen}
+          onClose={() => setIsNotificationsOpen(false)}
+        />
 
-          <LoginModal
-            isOpen={isLoginOpen}
-            onClose={() => setIsLoginOpen(false)}
-            onOpenSupport={() => setIsSupportOpen(true)}
-            onOpenSupabaseSetup={() => setIsSupabaseSetupOpen(true)}
-          />
+        <LoginModal
+          isOpen={isLoginOpen}
+          onClose={() => setIsLoginOpen(false)}
+          onOpenSupport={() => setIsSupportOpen(true)}
+          onOpenSupabaseSetup={() => setIsSupabaseSetupOpen(true)}
+          onOpenDocumentsVerification={() => setIsDocumentsVerificationOpen(true)}
+        />
 
-          <InstallAppModal
-            isOpen={isInstallOpen}
-            onClose={() => setIsInstallOpen(false)}
-          />
+        <InstallAppModal
+          isOpen={isInstallOpen}
+          onClose={() => setIsInstallOpen(false)}
+        />
 
-          <SupabaseSetupModal
-            isOpen={isSupabaseSetupOpen}
-            onClose={() => setIsSupabaseSetupOpen(false)}
-          />
-        </div>
+        <SupabaseSetupModal
+          isOpen={isSupabaseSetupOpen}
+          onClose={() => setIsSupabaseSetupOpen(false)}
+        />
+
+        <DocumentsVerificationModal
+          isOpen={isDocumentsVerificationOpen}
+          onClose={() => setIsDocumentsVerificationOpen(false)}
+          onOpenSupport={() => setIsSupportOpen(true)}
+        />
+      </div>
 
       {/* App Opening Loading Screen Splash (Shows on first launch & on replay) */}
       {isLoadingScreen && (

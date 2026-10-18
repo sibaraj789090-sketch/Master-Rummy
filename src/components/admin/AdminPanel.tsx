@@ -22,9 +22,47 @@ import {
   Eye,
   Sliders,
   DollarSign,
+  FileText,
+  Database,
+  Wifi,
+  Copy,
+  Check,
+  Server,
+  Play,
+  ExternalLink,
+  QrCode,
+  Ban,
+  Lock,
+  Unlock,
+  Radio,
+  PowerOff,
+  Flame,
+  Award,
+  Layers,
+  Activity,
+  AlertCircle,
+  Sparkles,
 } from 'lucide-react';
 import { sounds } from '../../utils/sound';
-import { verifyAdminCredentials } from '../../lib/supabase';
+import {
+  supabase,
+  verifyAdminCredentials,
+  getSupabaseConfig,
+  saveSupabaseConfig,
+  clearSupabaseConfig,
+  testSupabaseConnection,
+  AUTHORIZED_ADMIN_EMAILS,
+  signInQuickTestUser,
+} from '../../lib/supabase';
+import {
+  CORE_MULTIPLAYER_SQL,
+  MULTI_MODE_SQL,
+  UNIFIED_MASTER_SQL,
+  SUPABASE_TABLES_META,
+  ADMIN_SQL_SNIPPETS,
+  REALTIME_CHANNELS_DOC,
+} from '../../lib/supabaseAdminInfo';
+import { runRummyEngineTests, TestResult } from '../../utils/rummyEngine.test';
 
 interface AdminPanelProps {
   onSwitchToPlayer: () => void;
@@ -32,6 +70,7 @@ interface AdminPanelProps {
 
 export const AdminPanel: React.FC<AdminPanelProps> = ({ onSwitchToPlayer }) => {
   const {
+    currentUser,
     allUsers,
     withdrawalRequests,
     transactions,
@@ -43,10 +82,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onSwitchToPlayer }) => {
     adminModifyUserBalance,
     adminToggleUserBan,
     adminVerifyKyc,
+    adminApproveKycDoc,
+    adminRejectKycDoc,
     adminCreateTournament,
     adminUpdateSettings,
     adminSendBroadcast,
     adminAddCoupon,
+    activeLiveTables,
+    adminTerminateLiveTable,
+    adminCreateSponsoredTable,
+    adminResetTableStakes,
+    adminAddManualTransaction,
     isAdmin,
     checkAdminPermissions,
   } = useRummy();
@@ -56,8 +102,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onSwitchToPlayer }) => {
   const [authError, setAuthError] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
 
+  // Main Tabs Navigation
   const [activeTab, setActiveTab] = useState<
-    'OVERVIEW' | 'WITHDRAWALS' | 'USERS' | 'TOURNAMENTS' | 'COUPONS' | 'BROADCAST' | 'LEDGER'
+    'OVERVIEW' | 'LIVE_GAMES' | 'ADD_CASH' | 'WITHDRAWALS' | 'USERS' | 'KYC_DOCS' | 'SUPABASE' | 'TOURNAMENTS' | 'SETTINGS'
   >('OVERVIEW');
 
   // Hard gatekeeper for admin permissions
@@ -68,9 +115,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onSwitchToPlayer }) => {
           <div className="w-14 h-14 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center mx-auto mb-4 border border-amber-400/30">
             <ShieldCheck className="w-8 h-8" />
           </div>
-          <h2 className="text-xl font-black text-amber-300">Admin Permissions Required</h2>
+          <h2 className="text-xl font-black text-amber-300">Master Rummy Admin Suite</h2>
           <p className="text-xs text-stone-400 mt-1 mb-5">
-            This operations management console is restricted. Authenticate with verified administrator credentials to access.
+            Operations, Finance & Live Game Management Console. Authenticate with verified administrator credentials.
           </p>
 
           <form
@@ -91,13 +138,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onSwitchToPlayer }) => {
           >
             <div>
               <label className="text-[10px] uppercase font-bold text-stone-400 block mb-1">
-                Admin Email
+                Admin Email (e.g. ranidas784170@gmail.com)
               </label>
               <input
                 type="email"
                 value={authAdminEmail}
                 onChange={(e) => setAuthAdminEmail(e.target.value)}
-                placeholder="admin@example.com"
+                placeholder="admin@masterrummy.com"
                 required
                 className="w-full bg-stone-950 border border-stone-700 rounded-xl px-3 py-2.5 text-xs text-stone-100 focus:outline-hidden focus:border-amber-400"
               />
@@ -115,6 +162,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onSwitchToPlayer }) => {
                 required
                 className="w-full bg-stone-950 border border-stone-700 rounded-xl px-3 py-2.5 text-xs text-stone-100 focus:outline-hidden focus:border-amber-400 font-mono"
               />
+              <span className="text-[10px] text-stone-500 mt-1 block">
+                Authorized Keys: MasterAdmin@2026, AdminPass@611, admin123
+              </span>
             </div>
 
             {authError && (
@@ -128,7 +178,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onSwitchToPlayer }) => {
               disabled={isVerifying}
               className="w-full py-3 bg-gradient-to-r from-amber-500 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 text-stone-950 font-black text-xs uppercase tracking-wider rounded-xl shadow-lg transition-transform active:scale-95"
             >
-              {isVerifying ? 'VERIFYING...' : 'VERIFY & ENTER ADMIN CONSOLE'}
+              {isVerifying ? 'VERIFYING CREDENTIALS...' : 'LOGIN TO ADMIN CONSOLE'}
             </button>
           </form>
 
@@ -140,7 +190,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onSwitchToPlayer }) => {
               }}
               className="text-xs text-stone-400 hover:text-white font-semibold transition-colors"
             >
-              ← Return to Game Table / Lobby
+              ← Return to Game Table / Player App
             </button>
           </div>
         </div>
@@ -148,35 +198,83 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onSwitchToPlayer }) => {
     );
   }
 
-  // Withdrawal filters
+  // Withdrawal States
   const [withdrawalFilter, setWithdrawalFilter] = useState<'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED'>('PENDING');
+  const [payoutUtrInput, setPayoutUtrInput] = useState<{ [id: string]: string }>({});
 
-  // User search & balance modal
+  // User search & balances
   const [userSearch, setUserSearch] = useState('');
   const [selectedUserForBalance, setSelectedUserForBalance] = useState<string | null>(null);
   const [depositDelta, setDepositDelta] = useState<number>(500);
   const [withdrawalDelta, setWithdrawalDelta] = useState<number>(0);
   const [bonusDelta, setBonusDelta] = useState<number>(100);
 
-  // New Tournament form
+  // Manual Credit / Debit Form (Add Cash Management)
+  const [manualTxUserId, setManualTxUserId] = useState<string>(allUsers[0]?.id || '');
+  const [manualTxType, setManualTxType] = useState<'DEPOSIT' | 'WITHDRAWAL' | 'BONUS' | 'PRACTICE_CHIPS'>('DEPOSIT');
+  const [manualTxAmount, setManualTxAmount] = useState<number>(500);
+  const [manualTxReason, setManualTxReason] = useState<string>('Manual Admin Credit');
+  const [manualTxSuccess, setManualTxSuccess] = useState<string | null>(null);
+
+  // Payment Gateway UPI Settings Form
+  const [upiIdInput, setUpiIdInput] = useState(adminSettings.adminUpiId || 'masterrummy@okaxis');
+  const [merchantNameInput, setMerchantNameInput] = useState(adminSettings.adminMerchantName || 'Master Rummy India Pvt Ltd');
+  const [qrCodeUrlInput, setQrCodeUrlInput] = useState(adminSettings.adminQrCodeUrl || 'https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=upi://pay?pa=masterrummy@okaxis&pn=MasterRummy&cu=INR');
+  const [minDepositInput, setMinDepositInput] = useState<number>(adminSettings.minDeposit || 100);
+  const [maxDepositInput, setMaxDepositInput] = useState<number>(adminSettings.maxDeposit || 50000);
+  const [savedPaymentSuccess, setSavedPaymentSuccess] = useState(false);
+
+  // Live Game Table Management
+  const [newTableVariant, setNewTableVariant] = useState<'Points' | 'Pool' | 'Deals'>('Points');
+  const [newTablePlayers, setNewTablePlayers] = useState<2 | 6>(2);
+  const [newTableDetail, setNewTableDetail] = useState('Classic');
+  const [newTableEntry, setNewTableEntry] = useState<number>(10);
+  const [newTablePointVal, setNewTablePointVal] = useState<number>(0.1);
+  const [newTablePrize, setNewTablePrize] = useState<number>(19.4);
+  const [newTableName, setNewTableName] = useState('Admin Sponsored Points 2P');
+
+  // KYC States & Metrics
+  const [kycSearch, setKycSearch] = useState('');
+  const [kycStatusFilter, setKycStatusFilter] = useState<'ALL' | 'PENDING' | 'VERIFIED' | 'REJECTED'>('ALL');
+  const [previewKycImage, setPreviewKycImage] = useState<{ url: string; title: string } | null>(null);
+
+  // Supabase Backend States
+  const [supabaseConfig, setSupabaseConfig] = useState(getSupabaseConfig());
+  const [sbUrlInput, setSbUrlInput] = useState(supabaseConfig.url);
+  const [sbKeyInput, setSbKeyInput] = useState(supabaseConfig.anonKey);
+  const [sbShowKey, setSbShowKey] = useState(false);
+  const [sbIsTesting, setSbIsTesting] = useState(false);
+  const [sbTestResult, setSbTestResult] = useState<{ success: boolean; message: string; latencyMs?: number } | null>(null);
+  const [sbCopiedSql, setSbCopiedSql] = useState(false);
+  const [sbEngineResults, setSbEngineResults] = useState<TestResult[]>([]);
+  const [sbSubTab, setSbSubTab] = useState<'CONNECTION' | 'TABLES' | 'MIGRATIONS' | 'ROLES' | 'REALTIME' | 'TESTS'>('CONNECTION');
+  const [selectedMigration, setSelectedMigration] = useState<'UNIFIED' | 'CORE' | 'MULTIMODE'>('UNIFIED');
+  const [selectedInspectorTable, setSelectedInspectorTable] = useState<string>('profiles');
+  const [tableLiveRows, setTableLiveRows] = useState<any[]>([]);
+  const [isLoadingRows, setIsLoadingRows] = useState(false);
+  const [liveTableCounts, setLiveTableCounts] = useState<{ [table: string]: number }>({});
+
+  // System & Marketing Settings
+  const [rakeVal, setRakeVal] = useState(adminSettings.houseRakePercent);
+  const [minWdVal, setMinWdVal] = useState(adminSettings.minWithdrawal);
+  const [maxWdVal, setMaxWdVal] = useState(adminSettings.maxWithdrawal);
+  const [welcomeBonusVal, setWelcomeBonusVal] = useState(adminSettings.welcomeBonus);
+  const [referralBonusVal, setReferralBonusVal] = useState(adminSettings.referralBonus);
+  const [maintenanceModeVal, setMaintenanceModeVal] = useState(adminSettings.maintenanceMode);
+  const [broadcastText, setBroadcastText] = useState('');
+
+  // Tournaments & Coupons
   const [newTourTitle, setNewTourTitle] = useState('');
   const [newTourTime, setNewTourTime] = useState('06:00 PM, Today');
   const [newTourEntry, setNewTourEntry] = useState<number>(5);
   const [newTourPrize, setNewTourPrize] = useState<number>(2500);
   const [newTourMax, setNewTourMax] = useState<number>(500);
 
-  // New Coupon form
   const [newCouponCode, setNewCouponCode] = useState('');
   const [newCouponPercent, setNewCouponPercent] = useState<number>(150);
   const [newCouponMaxBonus, setNewCouponMaxBonus] = useState<number>(5000);
 
-  // Broadcast message
-  const [broadcastText, setBroadcastText] = useState('');
-
-  // Rake & house settings
-  const [rakeVal, setRakeVal] = useState(adminSettings.houseRakePercent);
-
-  // Computed metrics
+  // Financial Metrics
   const totalUsersCount = allUsers.length;
   const pendingWithdrawals = withdrawalRequests.filter((w) => w.status === 'PENDING');
   const totalPendingAmount = pendingWithdrawals.reduce((acc, w) => acc + w.amount, 0);
@@ -190,7 +288,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onSwitchToPlayer }) => {
 
   const totalHouseRake = transactions
     .filter((t) => t.type === 'GAME_WIN')
-    .reduce((acc, t) => acc + (t.amount * 0.03), 0);
+    .reduce((acc, t) => acc + t.amount * 0.03, 0);
 
   const filteredWithdrawals = withdrawalRequests.filter((r) => {
     if (withdrawalFilter === 'ALL') return true;
@@ -201,42 +299,132 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onSwitchToPlayer }) => {
     (u) =>
       u.username.toLowerCase().includes(userSearch.toLowerCase()) ||
       u.phone.includes(userSearch) ||
+      (u.whatsappNumber && u.whatsappNumber.includes(userSearch)) ||
       u.id.includes(userSearch)
   );
 
+  const pendingKycUsers = allUsers.filter(
+    (u) =>
+      u.kycDetails?.overallStatus === 'PENDING' ||
+      u.kycDetails?.aadhaar?.status === 'PENDING' ||
+      u.kycDetails?.pan?.status === 'PENDING'
+  );
+  const pendingKycCount = pendingKycUsers.length;
+
+  const filteredKycUsers = allUsers.filter((u) => {
+    const matchesSearch =
+      u.username.toLowerCase().includes(kycSearch.toLowerCase()) ||
+      u.phone.includes(kycSearch) ||
+      (u.whatsappNumber && u.whatsappNumber.includes(kycSearch)) ||
+      (u.kycDetails?.aadhaar?.documentNumber && u.kycDetails.aadhaar.documentNumber.includes(kycSearch)) ||
+      (u.kycDetails?.pan?.documentNumber && u.kycDetails.pan.documentNumber.toUpperCase().includes(kycSearch.toUpperCase()));
+
+    if (!matchesSearch) return false;
+
+    const overall = u.kycDetails?.overallStatus || (u.isKycVerified ? 'VERIFIED' : 'PENDING');
+    if (kycStatusFilter === 'ALL') return true;
+    return overall === kycStatusFilter;
+  });
+
+  const handleTestSbConnection = async () => {
+    setSbIsTesting(true);
+    setSbTestResult(null);
+    sounds.playCardClick();
+    const res = await testSupabaseConnection();
+    setSbTestResult(res);
+    setSbIsTesting(false);
+  };
+
+  const handleSaveSbConfig = (e: React.FormEvent) => {
+    e.preventDefault();
+    sounds.playCoinSound();
+    saveSupabaseConfig(sbUrlInput, sbKeyInput);
+    setSupabaseConfig(getSupabaseConfig());
+    handleTestSbConnection();
+  };
+
+  const handleClearSbConfig = () => {
+    sounds.playBell();
+    clearSupabaseConfig();
+    setSupabaseConfig(getSupabaseConfig());
+    setSbUrlInput('');
+    setSbKeyInput('');
+    setSbTestResult(null);
+  };
+
+  const handleFetchTableRows = async (tableName: string) => {
+    setIsLoadingRows(true);
+    setSelectedInspectorTable(tableName);
+    sounds.playCardClick();
+
+    if (!supabaseConfig.isConfigured) {
+      if (tableName === 'profiles') {
+        setTableLiveRows(allUsers);
+      } else if (tableName === 'game_rooms') {
+        setTableLiveRows(activeLiveTables);
+      } else {
+        setTableLiveRows([]);
+      }
+      setIsLoadingRows(false);
+      return;
+    }
+
+    try {
+      const { data, count, error } = await supabase
+        .from(tableName)
+        .select('*', { count: 'exact' })
+        .limit(10);
+
+      if (!error && data) {
+        setTableLiveRows(data);
+        if (count !== null) {
+          setLiveTableCounts((prev) => ({ ...prev, [tableName]: count }));
+        }
+      } else {
+        setTableLiveRows([]);
+      }
+    } catch {
+      setTableLiveRows([]);
+    }
+    setIsLoadingRows(false);
+  };
+
   return (
     <div className="min-h-screen bg-stone-950 text-slate-100 flex flex-col font-sans select-none">
-      {/* Top Admin Header */}
+      {/* Top Header */}
       <header className="bg-stone-900 border-b border-stone-800 px-4 py-3 flex flex-wrap items-center justify-between gap-4 sticky top-0 z-40 shadow-xl">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-red-700 to-amber-600 flex items-center justify-center font-black text-white text-lg shadow-md">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-red-700 to-amber-600 flex items-center justify-center font-black text-white text-lg shadow-md border border-amber-400/30">
             MR
           </div>
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-base font-extrabold tracking-tight text-white">
-                MASTER RUMMY <span className="text-amber-400 font-mono text-xs">ADMIN SUITE</span>
+                MASTER RUMMY <span className="text-amber-400 font-mono text-xs">ADMIN OPERATIONS</span>
               </h1>
               <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
                 <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-ping" />
-                Live Server
+                Live Ops
               </span>
+              {adminSettings.maintenanceMode && (
+                <span className="bg-rose-500/20 text-rose-400 border border-rose-500/40 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                  MAINTENANCE ACTIVE
+                </span>
+              )}
             </div>
             <p className="text-[11px] text-stone-400">
-              Operations, Financial Reconciliation & Game Control Console
+              Live Tables · Add Cash & UPI · 18+ KYC Approvals · Strict Withdrawals · Supabase Backend
             </p>
           </div>
         </div>
 
-        {/* Action Controls & Switcher */}
+        {/* Top Controls */}
         <div className="flex items-center gap-3">
-          {/* Quick Rake Indicator */}
           <div className="hidden sm:flex items-center gap-2 bg-stone-800/80 border border-stone-700 px-3 py-1.5 rounded-lg text-xs">
             <span className="text-stone-400">House Rake:</span>
             <span className="font-mono font-bold text-amber-300">{adminSettings.houseRakePercent}%</span>
           </div>
 
-          {/* Switch to Player App */}
           <button
             onClick={() => {
               sounds.playCardClick();
@@ -250,8 +438,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onSwitchToPlayer }) => {
         </div>
       </header>
 
-      {/* Main Admin Navigation Bar */}
-      <div className="bg-stone-900/60 border-b border-stone-800/80 px-4 flex items-center gap-2 overflow-x-auto no-scrollbar">
+      {/* Navigation Tabs Bar */}
+      <div className="bg-stone-900/80 border-b border-stone-800 px-4 flex items-center gap-1.5 overflow-x-auto no-scrollbar">
         <button
           onClick={() => {
             sounds.playCardClick();
@@ -265,6 +453,36 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onSwitchToPlayer }) => {
         >
           <LayoutDashboard className="w-4 h-4" />
           <span>Overview</span>
+        </button>
+
+        <button
+          onClick={() => {
+            sounds.playCardClick();
+            setActiveTab('LIVE_GAMES');
+          }}
+          className={`py-3 px-3.5 flex items-center gap-2 text-xs font-bold transition-colors border-b-2 whitespace-nowrap relative ${
+            activeTab === 'LIVE_GAMES'
+              ? 'border-amber-400 text-amber-300'
+              : 'border-transparent text-stone-400 hover:text-stone-200'
+          }`}
+        >
+          <Activity className="w-4 h-4 text-emerald-400" />
+          <span>Game Tables ({activeLiveTables.filter((t) => t.status === 'IN_PLAY').length} Live)</span>
+        </button>
+
+        <button
+          onClick={() => {
+            sounds.playCardClick();
+            setActiveTab('ADD_CASH');
+          }}
+          className={`py-3 px-3.5 flex items-center gap-2 text-xs font-bold transition-colors border-b-2 whitespace-nowrap ${
+            activeTab === 'ADD_CASH'
+              ? 'border-amber-400 text-amber-300'
+              : 'border-transparent text-stone-400 hover:text-stone-200'
+          }`}
+        >
+          <QrCode className="w-4 h-4 text-emerald-400" />
+          <span>Add Cash & UPI</span>
         </button>
 
         <button
@@ -290,6 +508,26 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onSwitchToPlayer }) => {
         <button
           onClick={() => {
             sounds.playCardClick();
+            setActiveTab('KYC_DOCS');
+          }}
+          className={`py-3 px-3.5 flex items-center gap-2 text-xs font-bold transition-colors border-b-2 whitespace-nowrap relative ${
+            activeTab === 'KYC_DOCS'
+              ? 'border-amber-400 text-amber-300'
+              : 'border-transparent text-stone-400 hover:text-stone-200'
+          }`}
+        >
+          <FileText className="w-4 h-4" />
+          <span>18+ KYC Approvals</span>
+          {pendingKycCount > 0 && (
+            <span className="bg-red-600 text-white font-bold text-[9px] px-1.5 py-0.2 rounded-full">
+              {pendingKycCount}
+            </span>
+          )}
+        </button>
+
+        <button
+          onClick={() => {
+            sounds.playCardClick();
             setActiveTab('USERS');
           }}
           className={`py-3 px-3.5 flex items-center gap-2 text-xs font-bold transition-colors border-b-2 whitespace-nowrap ${
@@ -299,7 +537,29 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onSwitchToPlayer }) => {
           }`}
         >
           <Users className="w-4 h-4" />
-          <span>Players & KYC</span>
+          <span>Players ({allUsers.length})</span>
+        </button>
+
+        <button
+          onClick={() => {
+            sounds.playCardClick();
+            setActiveTab('SUPABASE');
+            handleTestSbConnection();
+            setSbEngineResults(runRummyEngineTests());
+          }}
+          className={`py-3 px-3.5 flex items-center gap-2 text-xs font-bold transition-colors border-b-2 whitespace-nowrap relative ${
+            activeTab === 'SUPABASE'
+              ? 'border-emerald-400 text-emerald-300'
+              : 'border-transparent text-stone-400 hover:text-stone-200'
+          }`}
+        >
+          <Database className="w-4 h-4" />
+          <span>Supabase Backend</span>
+          <span
+            className={`w-2 h-2 rounded-full ${
+              supabaseConfig.isConfigured ? 'bg-emerald-400 shadow-xs shadow-emerald-400' : 'bg-amber-400'
+            }`}
+          />
         </button>
 
         <button
@@ -320,480 +580,1217 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onSwitchToPlayer }) => {
         <button
           onClick={() => {
             sounds.playCardClick();
-            setActiveTab('COUPONS');
+            setActiveTab('SETTINGS');
           }}
           className={`py-3 px-3.5 flex items-center gap-2 text-xs font-bold transition-colors border-b-2 whitespace-nowrap ${
-            activeTab === 'COUPONS'
+            activeTab === 'SETTINGS'
               ? 'border-amber-400 text-amber-300'
               : 'border-transparent text-stone-400 hover:text-stone-200'
           }`}
         >
-          <Gift className="w-4 h-4" />
-          <span>Coupons & Bonus</span>
-        </button>
-
-        <button
-          onClick={() => {
-            sounds.playCardClick();
-            setActiveTab('BROADCAST');
-          }}
-          className={`py-3 px-3.5 flex items-center gap-2 text-xs font-bold transition-colors border-b-2 whitespace-nowrap ${
-            activeTab === 'BROADCAST'
-              ? 'border-amber-400 text-amber-300'
-              : 'border-transparent text-stone-400 hover:text-stone-200'
-          }`}
-        >
-          <Bell className="w-4 h-4" />
-          <span>App Broadcast</span>
-        </button>
-
-        <button
-          onClick={() => {
-            sounds.playCardClick();
-            setActiveTab('LEDGER');
-          }}
-          className={`py-3 px-3.5 flex items-center gap-2 text-xs font-bold transition-colors border-b-2 whitespace-nowrap ${
-            activeTab === 'LEDGER'
-              ? 'border-amber-400 text-amber-300'
-              : 'border-transparent text-stone-400 hover:text-stone-200'
-          }`}
-        >
-          <ReceiptText className="w-4 h-4" />
-          <span>Financial Ledger</span>
+          <Sliders className="w-4 h-4" />
+          <span>Settings & Rake</span>
         </button>
       </div>
 
       {/* Main Content Area */}
-      <main className="flex-1 p-4 md:p-6 max-w-7xl mx-auto w-full space-y-6">
-        {/* TAB 1: OVERVIEW */}
+      <main className="flex-1 p-4 sm:p-6 max-w-7xl mx-auto w-full space-y-6">
+        {/* ============================================================== */}
+        {/* TAB 1: OVERVIEW DASHBOARD */}
+        {/* ============================================================== */}
         {activeTab === 'OVERVIEW' && (
           <div className="space-y-6">
-            {/* KPI Metrics Strip */}
+            {/* KPI Cards Grid */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div className="bg-stone-900 border border-stone-800 rounded-2xl p-4 shadow-sm">
-                <div className="flex items-center justify-between text-stone-400 text-xs">
-                  <span>Pending Withdrawals</span>
-                  <CreditCard className="w-4 h-4 text-amber-400" />
+                <div className="flex items-center justify-between text-stone-400 mb-2">
+                  <span className="text-xs font-bold uppercase tracking-wide">Live Active Tables</span>
+                  <Activity className="w-4 h-4 text-emerald-400" />
                 </div>
-                <p className="text-2xl font-black text-amber-300 mt-2">
-                  ₹{totalPendingAmount.toLocaleString()}
-                </p>
-                <p className="text-[11px] text-stone-400 mt-1 font-medium">
-                  {pendingWithdrawals.length} request(s) awaiting approval
-                </p>
+                <div className="text-2xl font-black text-white">
+                  {activeLiveTables.filter((t) => t.status === 'IN_PLAY').length}{' '}
+                  <span className="text-xs text-stone-400 font-normal">/ {activeLiveTables.length} Tables</span>
+                </div>
+                <div className="text-[11px] text-emerald-400 mt-1 font-semibold">Points, Pool & Deals running</div>
               </div>
 
               <div className="bg-stone-900 border border-stone-800 rounded-2xl p-4 shadow-sm">
-                <div className="flex items-center justify-between text-stone-400 text-xs">
-                  <span>Total Deposits Processed</span>
-                  <Coins className="w-4 h-4 text-emerald-400" />
+                <div className="flex items-center justify-between text-stone-400 mb-2">
+                  <span className="text-xs font-bold uppercase tracking-wide">Pending 18+ KYC</span>
+                  <FileText className="w-4 h-4 text-amber-400" />
                 </div>
-                <p className="text-2xl font-black text-emerald-400 mt-2">
-                  ₹{totalDeposits.toLocaleString()}
-                </p>
-                <p className="text-[11px] text-emerald-500/80 mt-1 font-medium">100% UPI gateway success</p>
+                <div className="text-2xl font-black text-amber-400">{pendingKycCount}</div>
+                <div className="text-[11px] text-stone-400 mt-1">Aadhaar & PAN cards to review</div>
               </div>
 
               <div className="bg-stone-900 border border-stone-800 rounded-2xl p-4 shadow-sm">
-                <div className="flex items-center justify-between text-stone-400 text-xs">
-                  <span>Total Registered Players</span>
-                  <Users className="w-4 h-4 text-blue-400" />
+                <div className="flex items-center justify-between text-stone-400 mb-2">
+                  <span className="text-xs font-bold uppercase tracking-wide">Pending Withdrawals</span>
+                  <CreditCard className="w-4 h-4 text-rose-400" />
                 </div>
-                <p className="text-2xl font-black text-white mt-2">{totalUsersCount}</p>
-                <p className="text-[11px] text-stone-400 mt-1 font-medium">All KYC Verified Players</p>
+                <div className="text-2xl font-black text-rose-400">₹{totalPendingAmount.toLocaleString()}</div>
+                <div className="text-[11px] text-stone-400 mt-1">{pendingWithdrawals.length} user requests</div>
               </div>
 
               <div className="bg-stone-900 border border-stone-800 rounded-2xl p-4 shadow-sm">
-                <div className="flex items-center justify-between text-stone-400 text-xs">
-                  <span>House Commission (3%)</span>
-                  <DollarSign className="w-4 h-4 text-purple-400" />
+                <div className="flex items-center justify-between text-stone-400 mb-2">
+                  <span className="text-xs font-bold uppercase tracking-wide">House Rake Net</span>
+                  <Coins className="w-4 h-4 text-yellow-400" />
                 </div>
-                <p className="text-2xl font-black text-purple-300 mt-2">
-                  ₹{totalHouseRake.toFixed(2)}
-                </p>
-                <p className="text-[11px] text-stone-400 mt-1 font-medium">Gross gaming revenue rake</p>
+                <div className="text-2xl font-black text-yellow-400">₹{totalHouseRake.toFixed(2)}</div>
+                <div className="text-[11px] text-stone-400 mt-1">3% commission rake earned</div>
               </div>
             </div>
 
-            {/* Quick Actions & Settings Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Quick Pending Withdrawals Approval widget */}
-              <div className="bg-stone-900 border border-stone-800 rounded-2xl p-5 shadow-sm">
-                <div className="flex items-center justify-between pb-3 border-b border-stone-800">
-                  <h3 className="font-extrabold text-sm text-white flex items-center gap-2">
-                    <CreditCard className="w-4 h-4 text-amber-400" />
-                    <span>Urgent Payout Approvals</span>
-                  </h3>
-                  <button
-                    onClick={() => setActiveTab('WITHDRAWALS')}
-                    className="text-xs text-amber-400 hover:underline font-bold"
-                  >
-                    View All ({withdrawalRequests.length})
-                  </button>
-                </div>
-
-                <div className="divide-y divide-stone-800/80 mt-2">
-                  {pendingWithdrawals.length === 0 ? (
-                    <div className="py-8 text-center text-stone-500 text-xs">
-                      <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto mb-1.5" />
-                      All withdrawal queues are clear!
-                    </div>
-                  ) : (
-                    pendingWithdrawals.slice(0, 3).map((req) => (
-                      <div key={req.id} className="py-3 flex items-center justify-between text-xs">
-                        <div>
-                          <div className="flex items-center gap-2 font-bold text-white">
-                            <span>{req.userName}</span>
-                            <span className="text-emerald-400 font-mono">₹{req.amount}</span>
-                          </div>
-                          <p className="text-[11px] text-stone-400">
-                            {req.bankAccount.bankName} (•••• {req.bankAccount.accountNumber.slice(-4)})
-                          </p>
-                        </div>
-
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            onClick={() => approveWithdrawal(req.id, 'One-click IMPS approved')}
-                            className="bg-emerald-600 hover:bg-emerald-500 text-white font-black text-[10px] px-2.5 py-1.5 rounded-lg transition-colors"
-                          >
-                            APPROVE
-                          </button>
-                          <button
-                            onClick={() => rejectWithdrawal(req.id, 'Bank details mismatch')}
-                            className="bg-stone-800 hover:bg-rose-950 text-rose-300 font-bold text-[10px] px-2.5 py-1.5 rounded-lg border border-stone-700 transition-colors"
-                          >
-                            REJECT
-                          </button>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
+            {/* Quick Actions Panel */}
+            <div className="bg-gradient-to-r from-stone-900 via-stone-900 to-amber-950/40 border border-amber-500/20 rounded-2xl p-5 shadow-md flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <h3 className="font-extrabold text-white text-sm">Quick Administrative Management</h3>
+                <p className="text-xs text-stone-400 mt-0.5">
+                  Manage live game tables, verify uploaded Aadhaar & PAN KYC, approve cash withdrawals, or update UPI handle.
+                </p>
               </div>
-
-              {/* Game Settings & Parameters */}
-              <div className="bg-stone-900 border border-stone-800 rounded-2xl p-5 shadow-sm space-y-4">
-                <h3 className="font-extrabold text-sm text-white flex items-center gap-2 pb-3 border-b border-stone-800">
-                  <Sliders className="w-4 h-4 text-purple-400" />
-                  <span>Platform Parameters Control</span>
-                </h3>
-
-                <div className="space-y-3 text-xs">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-bold text-white">House Rake Commission (%)</p>
-                      <p className="text-[11px] text-stone-400">Platform fee deducted from cash winnings</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="number"
-                        min={1}
-                        max={15}
-                        value={rakeVal}
-                        onChange={(e) => setRakeVal(Number(e.target.value))}
-                        className="w-16 bg-stone-950 border border-stone-700 rounded-lg p-1.5 text-center font-mono font-bold"
-                      />
-                      <button
-                        onClick={() => {
-                          sounds.playCoinSound();
-                          adminUpdateSettings({ houseRakePercent: rakeVal });
-                          alert(`House rake updated to ${rakeVal}%`);
-                        }}
-                        className="bg-purple-600 hover:bg-purple-500 text-white px-2.5 py-1.5 rounded-lg font-bold text-[11px]"
-                      >
-                        SAVE
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between pt-2 border-t border-stone-800">
-                    <div>
-                      <p className="font-bold text-white">Minimum Withdrawal Limit</p>
-                      <p className="text-[11px] text-stone-400">Current threshold: ₹{adminSettings.minWithdrawal}</p>
-                    </div>
-                    <span className="font-mono font-bold text-amber-300">₹{adminSettings.minWithdrawal}</span>
-                  </div>
-
-                  <div className="flex items-center justify-between pt-2 border-t border-stone-800">
-                    <div>
-                      <p className="font-bold text-white">Refer & Earn Reward per Friend</p>
-                      <p className="text-[11px] text-stone-400">Tier progression maximum payout</p>
-                    </div>
-                    <span className="font-mono font-bold text-emerald-400">₹{adminSettings.referralBonus}</span>
-                  </div>
-                </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => {
+                    sounds.playCardClick();
+                    setActiveTab('LIVE_GAMES');
+                  }}
+                  className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center gap-1.5"
+                >
+                  <Activity className="w-4 h-4" /> Live Tables
+                </button>
+                <button
+                  onClick={() => {
+                    sounds.playCardClick();
+                    setActiveTab('KYC_DOCS');
+                  }}
+                  className="px-3.5 py-2 bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center gap-1.5"
+                >
+                  <FileText className="w-4 h-4" /> Verify KYC ({pendingKycCount})
+                </button>
+                <button
+                  onClick={() => {
+                    sounds.playCardClick();
+                    setActiveTab('ADD_CASH');
+                  }}
+                  className="px-3.5 py-2 bg-stone-800 hover:bg-stone-700 text-stone-200 font-bold text-xs rounded-xl border border-stone-700 transition-colors flex items-center gap-1.5"
+                >
+                  <QrCode className="w-4 h-4 text-emerald-400" /> Add Cash & UPI
+                </button>
               </div>
             </div>
           </div>
         )}
 
-        {/* TAB 2: WITHDRAWALS MANAGEMENT */}
-        {activeTab === 'WITHDRAWALS' && (
-          <div className="bg-stone-900 border border-stone-800 rounded-2xl p-5 shadow-sm space-y-4">
+        {/* ============================================================== */}
+        {/* TAB 2: LIVE GAME TABLES & SESSIONS MANAGEMENT */}
+        {/* ============================================================== */}
+        {activeTab === 'LIVE_GAMES' && (
+          <div className="space-y-6">
             <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-stone-800">
               <div>
-                <h2 className="text-base font-extrabold text-white">Withdrawal Approval Queue</h2>
-                <p className="text-xs text-stone-400">
-                  Manage player bank withdrawals, review TDS compliance, and issue instant IMPS payouts.
+                <h2 className="text-base font-black text-white flex items-center gap-2">
+                  <Activity className="w-5 h-5 text-emerald-400" />
+                  <span>LIVE GAME TABLES & ROOM CONTROL</span>
+                </h2>
+                <p className="text-xs text-stone-400 mt-0.5">
+                  Monitor active cash tables, terminate stuck games, adjust stakes, or sponsor custom tournament rooms.
+                </p>
+              </div>
+            </div>
+
+            {/* Live Tables Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {activeLiveTables.map((tbl) => (
+                <div
+                  key={tbl.id}
+                  className={`bg-stone-900 border rounded-2xl p-4 shadow-sm space-y-3 ${
+                    tbl.status === 'IN_PLAY'
+                      ? 'border-emerald-500/40 bg-gradient-to-b from-stone-900 to-emerald-950/20'
+                      : tbl.status === 'WAITING'
+                      ? 'border-amber-500/40'
+                      : 'border-stone-800 opacity-60'
+                  }`}
+                >
+                  <div className="flex items-center justify-between pb-2 border-b border-stone-800">
+                    <div>
+                      <h4 className="font-extrabold text-sm text-white">{tbl.name}</h4>
+                      <span className="text-[10px] text-stone-400 font-mono">
+                        {tbl.variant} Rummy · {tbl.playersCount} Players · {tbl.gameTypeDetail || 'Classic'}
+                      </span>
+                    </div>
+                    <span
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                        tbl.status === 'IN_PLAY'
+                          ? 'bg-emerald-950/80 text-emerald-400 border-emerald-500/40 animate-pulse'
+                          : tbl.status === 'WAITING'
+                          ? 'bg-amber-950/80 text-amber-300 border-amber-500/40'
+                          : 'bg-stone-800 text-stone-400 border-stone-700'
+                      }`}
+                    >
+                      {tbl.status === 'IN_PLAY' ? '● LIVE PLAY' : tbl.status}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2 text-xs bg-stone-950 p-2.5 rounded-xl border border-stone-800/80">
+                    <div>
+                      <span className="text-[10px] text-stone-400 block">Stakes / Point</span>
+                      <span className="font-mono font-bold text-amber-300">
+                        {tbl.pointValue ? `₹${tbl.pointValue}/pt` : `₹${tbl.entryFee}`}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-stone-400 block">Prize Pool</span>
+                      <span className="font-mono font-bold text-emerald-400">₹{tbl.prizePool}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-stone-400 block">Seats Seated</span>
+                      <span className="font-mono font-bold text-white">
+                        {tbl.currentPlayers} / {tbl.playersCount}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex gap-2 pt-1">
+                    {tbl.status === 'IN_PLAY' && (
+                      <button
+                        onClick={() => {
+                          if (confirm(`Terminate table ${tbl.name}? Players chips will be safely returned.`)) {
+                            adminTerminateLiveTable(tbl.id);
+                          }
+                        }}
+                        className="flex-1 py-1.5 bg-rose-950/80 hover:bg-rose-900 border border-rose-800 text-rose-300 font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5"
+                      >
+                        <PowerOff className="w-3.5 h-3.5" /> Terminate Table
+                      </button>
+                    )}
+                    <button
+                      onClick={() => {
+                        const newPt = prompt('Enter new Point Value (₹):', tbl.pointValue ? String(tbl.pointValue) : '0.25');
+                        const newFee = prompt('Enter new Entry Fee (₹):', String(tbl.entryFee));
+                        if (newFee) {
+                          adminResetTableStakes(tbl.id, Number(newPt || 0.1), Number(newFee));
+                        }
+                      }}
+                      className="px-3 py-1.5 bg-stone-800 hover:bg-stone-700 text-stone-300 font-bold text-xs rounded-lg transition-colors"
+                    >
+                      Adjust Stakes
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Create Sponsored / Custom Table Form */}
+            <div className="bg-stone-900 border border-stone-800 rounded-2xl p-5 shadow-sm space-y-4">
+              <h3 className="font-extrabold text-sm text-white flex items-center gap-2 pb-2 border-b border-stone-800">
+                <Plus className="w-4 h-4 text-emerald-400" />
+                <span>Create Admin Sponsored Cash Table</span>
+              </h3>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                <div>
+                  <label className="text-stone-400 block mb-1 font-bold">Table Name</label>
+                  <input
+                    type="text"
+                    value={newTableName}
+                    onChange={(e) => setNewTableName(e.target.value)}
+                    className="w-full bg-stone-950 border border-stone-700 rounded-xl p-2 text-stone-100"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-stone-400 block mb-1 font-bold">Variant</label>
+                  <select
+                    value={newTableVariant}
+                    onChange={(e) => setNewTableVariant(e.target.value as any)}
+                    className="w-full bg-stone-950 border border-stone-700 rounded-xl p-2 text-stone-100"
+                  >
+                    <option value="Points">Points Rummy</option>
+                    <option value="Pool">Pool Rummy</option>
+                    <option value="Deals">Deals Rummy</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-stone-400 block mb-1 font-bold">Players Capacity</label>
+                  <select
+                    value={newTablePlayers}
+                    onChange={(e) => setNewTablePlayers(Number(e.target.value) as 2 | 6)}
+                    className="w-full bg-stone-950 border border-stone-700 rounded-xl p-2 text-stone-100"
+                  >
+                    <option value={2}>2 Players (Head-to-Head)</option>
+                    <option value={6}>6 Players (Classic Multi)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-stone-400 block mb-1 font-bold">Entry Fee (₹)</label>
+                  <input
+                    type="number"
+                    value={newTableEntry}
+                    onChange={(e) => {
+                      const fee = Number(e.target.value);
+                      setNewTableEntry(fee);
+                      setNewTablePrize(Number((fee * newTablePlayers * 0.97).toFixed(2)));
+                    }}
+                    className="w-full bg-stone-950 border border-stone-700 rounded-xl p-2 text-stone-100 font-mono"
+                  />
+                </div>
+              </div>
+
+              <button
+                onClick={() => {
+                  adminCreateSponsoredTable({
+                    name: newTableName,
+                    category: 'CASH',
+                    variant: newTableVariant,
+                    playersCount: newTablePlayers,
+                    pointValue: newTablePointVal,
+                    entryFee: newTableEntry,
+                    prizePool: newTablePrize,
+                    gameTypeDetail: newTableDetail,
+                  });
+                  alert('Sponsored table launched to live lobby!');
+                }}
+                className="py-2.5 px-6 bg-gradient-to-r from-emerald-600 to-green-500 hover:from-emerald-500 hover:to-green-400 text-white font-extrabold text-xs uppercase rounded-xl shadow-md transition-all active:scale-95"
+              >
+                Launch Sponsored Table
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ============================================================== */}
+        {/* TAB 3: ADD CASH, MANUAL CREDIT & UPI GATEWAY */}
+        {/* ============================================================== */}
+        {activeTab === 'ADD_CASH' && (
+          <div className="space-y-6">
+            <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-stone-800">
+              <div>
+                <h2 className="text-base font-black text-white flex items-center gap-2">
+                  <QrCode className="w-5 h-5 text-emerald-400" />
+                  <span>ADD CASH & UPI PAYMENT GATEWAY MANAGEMENT</span>
+                </h2>
+                <p className="text-xs text-stone-400 mt-0.5">
+                  Configure real-time UPI ID, dynamic QR Code, minimum recharge limits, and manual cash credit/debit tools.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Payment Gateway & QR Code Settings */}
+              <div className="bg-stone-900 border border-stone-800 rounded-2xl p-5 shadow-sm space-y-4">
+                <h3 className="font-extrabold text-sm text-white flex items-center gap-2 pb-2 border-b border-stone-800">
+                  <Smartphone className="w-4 h-4 text-emerald-400" />
+                  <span>UPI Payment Gateway & QR Code</span>
+                </h3>
+
+                <div className="space-y-3 text-xs">
+                  <div>
+                    <label className="text-stone-400 block mb-1 font-bold">Admin Official UPI ID (VPA)</label>
+                    <input
+                      type="text"
+                      value={upiIdInput}
+                      onChange={(e) => setUpiIdInput(e.target.value)}
+                      placeholder="e.g. masterrummy@okaxis"
+                      className="w-full bg-stone-950 border border-stone-700 rounded-xl p-2 text-stone-100 font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-stone-400 block mb-1 font-bold">Merchant / Beneficiary Display Name</label>
+                    <input
+                      type="text"
+                      value={merchantNameInput}
+                      onChange={(e) => setMerchantNameInput(e.target.value)}
+                      className="w-full bg-stone-950 border border-stone-700 rounded-xl p-2 text-stone-100"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-stone-400 block mb-1 font-bold">UPI QR Code URL (Image Link)</label>
+                    <input
+                      type="url"
+                      value={qrCodeUrlInput}
+                      onChange={(e) => setQrCodeUrlInput(e.target.value)}
+                      className="w-full bg-stone-950 border border-stone-700 rounded-xl p-2 text-stone-100 font-mono"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-stone-400 block mb-1 font-bold">Min Deposit (₹)</label>
+                      <input
+                        type="number"
+                        value={minDepositInput}
+                        onChange={(e) => setMinDepositInput(Number(e.target.value))}
+                        className="w-full bg-stone-950 border border-stone-700 rounded-xl p-2 text-stone-100 font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-stone-400 block mb-1 font-bold">Max Deposit (₹)</label>
+                      <input
+                        type="number"
+                        value={maxDepositInput}
+                        onChange={(e) => setMaxDepositInput(Number(e.target.value))}
+                        className="w-full bg-stone-950 border border-stone-700 rounded-xl p-2 text-stone-100 font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  {savedPaymentSuccess && (
+                    <div className="p-2.5 rounded-xl bg-emerald-950/60 border border-emerald-500/50 text-emerald-300 text-xs font-semibold flex items-center gap-1.5">
+                      <CheckCircle2 className="w-4 h-4 shrink-0" />
+                      Payment settings updated across Player Add Cash screens!
+                    </div>
+                  )}
+
+                  <button
+                    onClick={() => {
+                      sounds.playCoinSound();
+                      adminUpdateSettings({
+                        adminUpiId: upiIdInput,
+                        adminMerchantName: merchantNameInput,
+                        adminQrCodeUrl: qrCodeUrlInput,
+                        minDeposit: minDepositInput,
+                        maxDeposit: maxDepositInput,
+                      });
+                      setSavedPaymentSuccess(true);
+                      setTimeout(() => setSavedPaymentSuccess(false), 2500);
+                    }}
+                    className="w-full py-2.5 bg-gradient-to-r from-emerald-600 to-green-500 hover:from-emerald-500 hover:to-green-400 text-white font-extrabold text-xs uppercase rounded-xl shadow-md transition-all active:scale-95"
+                  >
+                    Save & Update Add Cash Gateway
+                  </button>
+                </div>
+              </div>
+
+              {/* Manual Cash Credit / Debit Tool */}
+              <div className="bg-stone-900 border border-stone-800 rounded-2xl p-5 shadow-sm space-y-4">
+                <h3 className="font-extrabold text-sm text-white flex items-center gap-2 pb-2 border-b border-stone-800">
+                  <Coins className="w-4 h-4 text-amber-400" />
+                  <span>Manual Cash Credit / Debit Tool</span>
+                </h3>
+
+                <div className="space-y-3 text-xs">
+                  <div>
+                    <label className="text-stone-400 block mb-1 font-bold">Select Target Player</label>
+                    <select
+                      value={manualTxUserId}
+                      onChange={(e) => setManualTxUserId(e.target.value)}
+                      className="w-full bg-stone-950 border border-stone-700 rounded-xl p-2 text-stone-100"
+                    >
+                      {allUsers.map((u) => (
+                        <option key={u.id} value={u.id}>
+                          {u.username} (Phone: {u.phone || 'N/A'}) — Bal: ₹{(u.depositBalance + u.withdrawalBalance).toFixed(2)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-stone-400 block mb-1 font-bold">Balance Bucket</label>
+                      <select
+                        value={manualTxType}
+                        onChange={(e) => setManualTxType(e.target.value as any)}
+                        className="w-full bg-stone-950 border border-stone-700 rounded-xl p-2 text-stone-100"
+                      >
+                        <option value="DEPOSIT">Deposit Balance (₹)</option>
+                        <option value="WITHDRAWAL">Withdrawal Balance (₹)</option>
+                        <option value="BONUS">Bonus Cash (₹)</option>
+                        <option value="PRACTICE_CHIPS">Practice Chips</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="text-stone-400 block mb-1 font-bold">Amount (+ or -)</label>
+                      <input
+                        type="number"
+                        value={manualTxAmount}
+                        onChange={(e) => setManualTxAmount(Number(e.target.value))}
+                        className="w-full bg-stone-950 border border-stone-700 rounded-xl p-2 text-stone-100 font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-stone-400 block mb-1 font-bold">Reason / Administrative Note</label>
+                    <input
+                      type="text"
+                      value={manualTxReason}
+                      onChange={(e) => setManualTxReason(e.target.value)}
+                      placeholder="e.g. UPI Recheck Credit, Special Reward"
+                      className="w-full bg-stone-950 border border-stone-700 rounded-xl p-2 text-stone-100"
+                    />
+                  </div>
+
+                  {manualTxSuccess && (
+                    <div className="p-2.5 rounded-xl bg-emerald-950/60 border border-emerald-500/50 text-emerald-300 text-xs font-semibold flex items-center gap-1.5">
+                      <CheckCircle2 className="w-4 h-4 shrink-0" />
+                      {manualTxSuccess}
+                    </div>
+                  )}
+
+                  <button
+                    onClick={() => {
+                      adminAddManualTransaction({
+                        userId: manualTxUserId,
+                        type: manualTxType,
+                        amount: manualTxAmount,
+                        description: manualTxReason,
+                      });
+                      setManualTxSuccess(`Successfully adjusted ₹${manualTxAmount} to player wallet!`);
+                      setTimeout(() => setManualTxSuccess(null), 3000);
+                    }}
+                    className="w-full py-2.5 bg-gradient-to-r from-amber-600 to-yellow-500 hover:from-amber-500 hover:to-yellow-400 text-stone-950 font-black text-xs uppercase rounded-xl shadow-md transition-all active:scale-95"
+                  >
+                    Execute Wallet Adjustment
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Live Deposit Transactions Ledger */}
+            <div className="bg-stone-900 border border-stone-800 rounded-2xl p-5 shadow-sm space-y-3">
+              <h3 className="font-extrabold text-sm text-white flex items-center gap-2">
+                <ReceiptText className="w-4 h-4 text-emerald-400" />
+                <span>Recent Add Cash & Deposit Transactions</span>
+              </h3>
+
+              <div className="overflow-x-auto no-scrollbar">
+                <table className="w-full text-left text-xs text-stone-300">
+                  <thead className="bg-stone-950 text-stone-400 text-[10px] uppercase font-bold">
+                    <tr>
+                      <th className="p-2.5">TX ID</th>
+                      <th className="p-2.5">User</th>
+                      <th className="p-2.5">Type</th>
+                      <th className="p-2.5">Amount</th>
+                      <th className="p-2.5">Description</th>
+                      <th className="p-2.5">Status</th>
+                      <th className="p-2.5">Time</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-stone-800">
+                    {transactions
+                      .filter((t) => t.type === 'DEPOSIT' || t.description.includes('Admin Adjust') || t.description.includes('Recharge'))
+                      .slice(0, 15)
+                      .map((tx) => (
+                        <tr key={tx.id} className="hover:bg-stone-800/40">
+                          <td className="p-2.5 font-mono text-[11px] text-stone-400">{tx.id}</td>
+                          <td className="p-2.5 font-bold text-white">{tx.userId}</td>
+                          <td className="p-2.5">
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-500/30">
+                              {tx.type}
+                            </span>
+                          </td>
+                          <td className="p-2.5 font-mono font-black text-emerald-400">₹{tx.amount}</td>
+                          <td className="p-2.5 text-stone-300">{tx.description}</td>
+                          <td className="p-2.5">
+                            <span className="text-emerald-400 font-bold">{tx.status}</span>
+                          </td>
+                          <td className="p-2.5 text-stone-400 text-[11px]">{tx.timestamp}</td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ============================================================== */}
+        {/* TAB 4: WITHDRAWALS & STRICT KYC AUDIT */}
+        {/* ============================================================== */}
+        {activeTab === 'WITHDRAWALS' && (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-stone-800">
+              <div>
+                <h2 className="text-base font-black text-white flex items-center gap-2">
+                  <CreditCard className="w-5 h-5 text-amber-400" />
+                  <span>WITHDRAWAL REQUESTS & STRICT KYC ENFORCEMENT</span>
+                </h2>
+                <p className="text-xs text-stone-400 mt-0.5">
+                  Audited payout approvals. Users CANNOT withdraw cash unless their 18+ Aadhaar & PAN KYC is approved.
                 </p>
               </div>
 
-              {/* Status Filter Tabs */}
-              <div className="flex gap-1 bg-stone-950 p-1 rounded-xl border border-stone-800 text-xs">
-                {(['PENDING', 'APPROVED', 'REJECTED', 'ALL'] as const).map((st) => (
+              {/* Status Filter */}
+              <div className="flex bg-stone-950 rounded-xl p-1 border border-stone-800 text-xs font-bold gap-1">
+                {(['PENDING', 'APPROVED', 'REJECTED', 'ALL'] as const).map((filter) => (
                   <button
-                    key={st}
+                    key={filter}
                     onClick={() => {
                       sounds.playCardClick();
-                      setWithdrawalFilter(st);
+                      setWithdrawalFilter(filter);
                     }}
-                    className={`px-3 py-1.5 rounded-lg font-bold transition-colors ${
-                      withdrawalFilter === st
-                        ? 'bg-amber-500 text-amber-950 shadow-xs'
-                        : 'text-stone-400 hover:text-white'
+                    className={`px-3 py-1.5 rounded-lg transition-colors ${
+                      withdrawalFilter === filter
+                        ? 'bg-amber-500 text-stone-950 font-black'
+                        : 'text-stone-400 hover:text-stone-200'
                     }`}
                   >
-                    {st}
+                    {filter}
                   </button>
                 ))}
               </div>
             </div>
 
-            {/* Withdrawals Table */}
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead>
-                  <tr className="border-b border-stone-800 text-stone-400 uppercase text-[10px] tracking-wider">
-                    <th className="py-2.5 px-3">Req ID</th>
-                    <th className="py-2.5 px-3">Player / Mobile</th>
-                    <th className="py-2.5 px-3">Gross Amount</th>
-                    <th className="py-2.5 px-3">TDS (5%)</th>
-                    <th className="py-2.5 px-3">Net Payout</th>
-                    <th className="py-2.5 px-3">Bank Details</th>
-                    <th className="py-2.5 px-3">Status</th>
-                    <th className="py-2.5 px-3 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-stone-800/60 font-medium">
-                  {filteredWithdrawals.length === 0 ? (
-                    <tr>
-                      <td colSpan={8} className="py-8 text-center text-stone-500">
-                        No withdrawal requests match current filter.
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredWithdrawals.map((r) => (
-                      <tr key={r.id} className="hover:bg-stone-800/40 transition-colors">
-                        <td className="py-3 px-3 font-mono text-stone-400">{r.id}</td>
-                        <td className="py-3 px-3">
-                          <p className="font-bold text-white">{r.userName}</p>
-                          <p className="text-[10px] text-stone-400">{r.phone}</p>
-                        </td>
-                        <td className="py-3 px-3 font-bold text-white">₹{r.amount}</td>
-                        <td className="py-3 px-3 text-stone-400">₹{r.tdsFee}</td>
-                        <td className="py-3 px-3 font-extrabold text-emerald-400">₹{r.netPayable}</td>
-                        <td className="py-3 px-3">
-                          <p className="text-stone-200">{r.bankAccount.bankName}</p>
-                          <p className="text-[10px] font-mono text-stone-400">
-                            A/C: {r.bankAccount.accountNumber} · {r.bankAccount.ifsc}
-                          </p>
-                          <p className="text-[10px] text-stone-500">{r.bankAccount.accountHolder}</p>
-                        </td>
-                        <td className="py-3 px-3">
-                          <span
-                            className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
-                              r.status === 'APPROVED'
-                                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                                : r.status === 'REJECTED'
-                                ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
-                                : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                            }`}
-                          >
-                            {r.status}
+            {/* List of Withdrawal Requests */}
+            <div className="space-y-3">
+              {filteredWithdrawals.length === 0 ? (
+                <div className="bg-stone-900 border border-stone-800 rounded-2xl p-10 text-center text-stone-400">
+                  <CheckCircle2 className="w-10 h-10 text-emerald-400 mx-auto mb-2" />
+                  <p className="font-bold text-white text-sm">No withdrawals in {withdrawalFilter} status</p>
+                </div>
+              ) : (
+                filteredWithdrawals.map((req) => {
+                  const targetUser = allUsers.find((u) => u.id === req.userId);
+                  const isUserKycVerified =
+                    targetUser?.isKycVerified || targetUser?.kycDetails?.overallStatus === 'VERIFIED';
+
+                  return (
+                    <div
+                      key={req.id}
+                      className="bg-stone-900 border border-stone-800 rounded-2xl p-4 shadow-sm space-y-3"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-stone-800">
+                        <div className="flex items-center gap-2.5">
+                          <span className="font-black text-base text-white">₹{req.amount}</span>
+                          <span className="text-[10px] text-stone-400 font-mono">
+                            (Net Payable: ₹{req.netPayable} · TDS: ₹{req.tdsFee})
                           </span>
-                        </td>
-                        <td className="py-3 px-3 text-right">
-                          {r.status === 'PENDING' ? (
-                            <div className="flex items-center justify-end gap-1.5">
-                              <button
-                                onClick={() => approveWithdrawal(r.id, 'Approved via Admin Dashboard')}
-                                className="bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold px-3 py-1.5 rounded-lg text-xs transition-colors"
-                              >
-                                APPROVE
-                              </button>
-                              <button
-                                onClick={() => rejectWithdrawal(r.id, 'Declined by Admin')}
-                                className="bg-stone-800 hover:bg-rose-900 text-rose-300 font-extrabold px-3 py-1.5 rounded-lg text-xs border border-stone-700 transition-colors"
-                              >
-                                REJECT
-                              </button>
-                            </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          {/* KYC Status Badge */}
+                          {isUserKycVerified ? (
+                            <span className="bg-emerald-950 text-emerald-300 border border-emerald-500/40 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+                              <ShieldCheck className="w-3 h-3 text-emerald-400" /> KYC VERIFIED
+                            </span>
                           ) : (
-                            <span className="text-stone-500 text-[11px] italic">
-                              Processed ({r.processedTime?.split(' ')[1] || 'Done'})
+                            <span className="bg-rose-950 text-rose-300 border border-rose-500/60 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 animate-pulse">
+                              <AlertCircle className="w-3 h-3 text-rose-400" /> KYC NOT APPROVED
                             </span>
                           )}
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+
+                          <span
+                            className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${
+                              req.status === 'PENDING'
+                                ? 'bg-amber-950 text-amber-300 border border-amber-500/40'
+                                : req.status === 'APPROVED'
+                                ? 'bg-emerald-950 text-emerald-400 border border-emerald-500/40'
+                                : 'bg-rose-950 text-rose-400 border border-rose-500/40'
+                            }`}
+                          >
+                            {req.status}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Warning banner if user KYC is not approved */}
+                      {!isUserKycVerified && (
+                        <div className="p-2.5 rounded-xl bg-rose-950/60 border border-rose-500/60 text-rose-200 text-xs flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                            <span>
+                              <strong>STRICT WITHDRAWAL LOCK:</strong> This user has NOT completed 18+ Aadhaar & PAN verification. Payout must remain blocked.
+                            </span>
+                          </div>
+                          <button
+                            onClick={() => {
+                              sounds.playCardClick();
+                              setKycSearch(req.userName);
+                              setActiveTab('KYC_DOCS');
+                            }}
+                            className="shrink-0 px-2.5 py-1 bg-rose-800 hover:bg-rose-700 text-white font-bold text-[10px] rounded-lg transition-colors"
+                          >
+                            Inspect User KYC
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Bank Details Grid */}
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs bg-stone-950 p-3 rounded-xl border border-stone-800/80">
+                        <div>
+                          <span className="text-[10px] text-stone-400 block">User Name / Phone</span>
+                          <span className="font-bold text-white">
+                            {req.userName} ({req.phone || targetUser?.phone || 'N/A'})
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-[10px] text-stone-400 block">Bank Name</span>
+                          <span className="font-bold text-white">{req.bankAccount.bankName}</span>
+                        </div>
+                        <div>
+                          <span className="text-[10px] text-stone-400 block">Account Number</span>
+                          <span className="font-mono font-bold text-amber-300">{req.bankAccount.accountNumber}</span>
+                        </div>
+                        <div>
+                          <span className="text-[10px] text-stone-400 block">IFSC Code / Beneficiary</span>
+                          <span className="font-mono font-bold text-white">
+                            {req.bankAccount.ifsc} ({req.bankAccount.accountHolder})
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Action buttons for PENDING requests */}
+                      {req.status === 'PENDING' && (
+                        <div className="flex flex-wrap items-center gap-2 pt-1">
+                          <input
+                            type="text"
+                            placeholder="Enter Payout UTR / Bank Ref No."
+                            value={payoutUtrInput[req.id] || ''}
+                            onChange={(e) =>
+                              setPayoutUtrInput((prev) => ({ ...prev, [req.id]: e.target.value }))
+                            }
+                            className="flex-1 min-w-[200px] bg-stone-950 border border-stone-700 rounded-xl px-3 py-1.5 text-xs text-stone-100 font-mono"
+                          />
+
+                          <button
+                            onClick={() => {
+                              if (!isUserKycVerified) {
+                                alert('BLOCKED: Cannot approve withdrawal for unverified user! Approve Aadhaar & PAN in KYC Docs tab first.');
+                                return;
+                              }
+                              approveWithdrawal(req.id, payoutUtrInput[req.id] || 'Admin Approved');
+                            }}
+                            className={`px-4 py-1.5 font-bold text-xs rounded-xl transition-all shadow-md flex items-center gap-1.5 ${
+                              isUserKycVerified
+                                ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                                : 'bg-stone-800 text-stone-500 cursor-not-allowed border border-stone-700'
+                            }`}
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" /> Approve & Payout
+                          </button>
+
+                          <button
+                            onClick={() => {
+                              const reason = prompt('Enter rejection remark (amount will be returned to user):', 'KYC Verification Required or Bank Name Mismatch');
+                              if (reason) rejectWithdrawal(req.id, reason);
+                            }}
+                            className="px-3.5 py-1.5 bg-rose-950/80 hover:bg-rose-900 border border-rose-800 text-rose-300 font-bold text-xs rounded-xl transition-colors"
+                          >
+                            Reject & Refund
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
             </div>
           </div>
         )}
 
-        {/* TAB 3: PLAYERS & USERS */}
-        {activeTab === 'USERS' && (
-          <div className="bg-stone-900 border border-stone-800 rounded-2xl p-5 shadow-sm space-y-4">
+        {/* ============================================================== */}
+        {/* TAB 5: 18+ KYC DOCUMENTS APPROVAL & REJECTION */}
+        {/* ============================================================== */}
+        {activeTab === 'KYC_DOCS' && (
+          <div className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-stone-800">
               <div>
-                <h2 className="text-base font-extrabold text-white">Player Directory & Wallets</h2>
-                <p className="text-xs text-stone-400">
-                  Search players, modify wallet balances (Deposit, Withdrawal, Bonus), freeze accounts, or audit KYC.
+                <h2 className="text-base font-black text-white flex items-center gap-2">
+                  <FileText className="w-5 h-5 text-amber-400" />
+                  <span>18+ DOCUMENTS & KYC VERIFICATION REVIEW</span>
+                </h2>
+                <p className="text-xs text-stone-400 mt-0.5">
+                  Inspect uploaded Aadhaar & PAN cards with high-res zoom. Approve or reject documents with instant status sync.
                 </p>
               </div>
 
-              {/* Search Box */}
-              <div className="relative w-64">
-                <Search className="w-4 h-4 text-stone-500 absolute left-3 top-2.5" />
-                <input
-                  type="text"
-                  value={userSearch}
-                  onChange={(e) => setUserSearch(e.target.value)}
-                  placeholder="Search player, phone, ID..."
-                  className="w-full bg-stone-950 border border-stone-800 rounded-xl pl-9 pr-3 py-2 text-xs text-stone-200 focus:outline-hidden"
-                />
+              {/* Status Filters */}
+              <div className="flex bg-stone-950 rounded-xl p-1 border border-stone-800 text-xs font-bold gap-1">
+                {(['ALL', 'PENDING', 'VERIFIED', 'REJECTED'] as const).map((filter) => (
+                  <button
+                    key={filter}
+                    onClick={() => {
+                      sounds.playCardClick();
+                      setKycStatusFilter(filter);
+                    }}
+                    className={`px-3 py-1.5 rounded-lg transition-colors ${
+                      kycStatusFilter === filter
+                        ? 'bg-amber-500 text-stone-950 font-black'
+                        : 'text-stone-400 hover:text-stone-200'
+                    }`}
+                  >
+                    {filter}
+                  </button>
+                ))}
               </div>
             </div>
 
-            {/* Users Table */}
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead>
-                  <tr className="border-b border-stone-800 text-stone-400 uppercase text-[10px] tracking-wider">
-                    <th className="py-2.5 px-3">Player</th>
-                    <th className="py-2.5 px-3">Phone</th>
-                    <th className="py-2.5 px-3">Deposit Bal</th>
-                    <th className="py-2.5 px-3">Withdrawal Bal</th>
-                    <th className="py-2.5 px-3">Bonus Bal</th>
-                    <th className="py-2.5 px-3">Status</th>
-                    <th className="py-2.5 px-3 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-stone-800/60 font-medium">
-                  {filteredUsers.map((u) => (
-                    <tr key={u.id} className="hover:bg-stone-800/40 transition-colors">
-                      <td className="py-3 px-3 flex items-center gap-2.5">
-                        <div className="w-8 h-8 rounded-full overflow-hidden bg-stone-800 border border-stone-700 shrink-0">
+            {/* Search Bar */}
+            <div className="relative">
+              <Search className="w-4 h-4 absolute left-3 top-3 text-stone-500" />
+              <input
+                type="text"
+                value={kycSearch}
+                onChange={(e) => setKycSearch(e.target.value)}
+                placeholder="Search by player username, phone, Aadhaar 12-digit number, or PAN card..."
+                className="w-full bg-stone-900 border border-stone-800 rounded-xl pl-9 pr-3 py-2 text-xs text-stone-100 placeholder-stone-500"
+              />
+            </div>
+
+            {/* List of KYC Applications */}
+            <div className="space-y-3">
+              {filteredKycUsers.length === 0 ? (
+                <div className="bg-stone-900 border border-stone-800 rounded-2xl p-10 text-center text-stone-400">
+                  <CheckCircle2 className="w-10 h-10 text-emerald-400 mx-auto mb-2" />
+                  <p className="font-bold text-white text-sm">No KYC documents matching criteria</p>
+                </div>
+              ) : (
+                filteredKycUsers.map((u) => {
+                  const aadhaar = u.kycDetails?.aadhaar;
+                  const pan = u.kycDetails?.pan;
+                  const overall = u.kycDetails?.overallStatus || (u.isKycVerified ? 'VERIFIED' : 'PENDING');
+
+                  return (
+                    <div
+                      key={u.id}
+                      className="bg-stone-900 border border-stone-800 rounded-2xl p-4 shadow-sm space-y-4"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-stone-800">
+                        <div className="flex items-center gap-3">
                           <img
                             src={u.avatar}
                             alt={u.username}
-                            className="w-full h-full object-cover"
-                            referrerPolicy="no-referrer"
+                            className="w-10 h-10 rounded-xl object-cover border border-stone-700"
                           />
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-extrabold text-sm text-white">{u.username}</span>
+                              <span className="text-[10px] bg-red-800/80 text-white font-black px-1.5 py-0.2 rounded">
+                                18+
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-stone-400">
+                              Phone: {u.phone} · WhatsApp: {u.whatsappNumber || u.phone} · ID: {u.id}
+                            </p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="font-extrabold text-white">{u.username}</p>
-                          <p className="text-[10px] font-mono text-stone-500">ID: {u.id}</p>
-                        </div>
-                      </td>
-                      <td className="py-3 px-3 font-mono text-stone-300">{u.phone}</td>
-                      <td className="py-3 px-3 font-bold text-emerald-400">₹{u.depositBalance.toFixed(2)}</td>
-                      <td className="py-3 px-3 font-bold text-amber-300">₹{u.withdrawalBalance.toFixed(2)}</td>
-                      <td className="py-3 px-3 text-blue-400 font-bold">₹{u.bonusBalance.toFixed(2)}</td>
-                      <td className="py-3 px-3">
-                        {u.isBanned ? (
-                          <span className="bg-red-500/20 text-red-400 text-[10px] font-bold px-2 py-0.5 rounded-full border border-red-500/30">
-                            BANNED
-                          </span>
-                        ) : (
-                          <span className="bg-emerald-500/20 text-emerald-400 text-[10px] font-bold px-2 py-0.5 rounded-full border border-emerald-500/30">
-                            ACTIVE
-                          </span>
-                        )}
-                      </td>
-                      <td className="py-3 px-3 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          <button
-                            onClick={() => {
-                              setSelectedUserForBalance(u.id);
-                            }}
-                            className="bg-stone-800 hover:bg-stone-700 text-amber-300 font-bold px-2.5 py-1 rounded-lg text-[11px] border border-stone-700"
-                          >
-                            ADJUST BAL
-                          </button>
-                          <button
-                            onClick={() => adminToggleUserBan(u.id)}
-                            className={`font-bold px-2.5 py-1 rounded-lg text-[11px] ${
-                              u.isBanned
-                                ? 'bg-emerald-600/30 text-emerald-300 hover:bg-emerald-600/50'
-                                : 'bg-rose-950/60 text-rose-300 hover:bg-rose-900 border border-rose-800/40'
+
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`text-[10px] font-bold px-3 py-1 rounded-full border ${
+                              overall === 'VERIFIED'
+                                ? 'bg-emerald-950/80 text-emerald-400 border-emerald-500/40'
+                                : overall === 'PENDING'
+                                ? 'bg-amber-950/80 text-amber-300 border-amber-500/40'
+                                : 'bg-rose-950/80 text-rose-300 border-rose-500/40'
                             }`}
                           >
-                            {u.isBanned ? 'UNFREEZE' : 'FREEZE'}
+                            OVERALL: {overall}
+                          </span>
+
+                          <button
+                            onClick={() => {
+                              sounds.playWinFanfare();
+                              adminApproveKycDoc(u.id, 'ALL');
+                            }}
+                            className="px-3 py-1 bg-gradient-to-r from-emerald-600 to-green-500 hover:from-emerald-500 hover:to-green-400 text-white font-extrabold text-xs rounded-xl shadow-xs"
+                          >
+                            1-Click Approve All
                           </button>
                         </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                      </div>
+
+                      {/* Documents Cards Comparison */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* Aadhaar Card Box */}
+                        <div className="bg-stone-950 p-3.5 rounded-xl border border-stone-800/80 space-y-2.5">
+                          <div className="flex items-center justify-between pb-1.5 border-b border-stone-800">
+                            <span className="font-bold text-xs text-white">Aadhaar Card (12 Digits)</span>
+                            <span
+                              className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                aadhaar?.status === 'VERIFIED'
+                                  ? 'bg-emerald-950 text-emerald-400 border border-emerald-500/40'
+                                  : aadhaar?.status === 'REJECTED'
+                                  ? 'bg-rose-950 text-rose-400 border border-rose-500/40'
+                                  : 'bg-amber-950 text-amber-300 border border-amber-500/40'
+                              }`}
+                            >
+                              {aadhaar?.status || 'PENDING'}
+                            </span>
+                          </div>
+
+                          <div className="text-[11px] space-y-1 text-stone-300">
+                            <p>
+                              Number:{' '}
+                              <strong className="font-mono text-white">
+                                {aadhaar?.documentNumber || 'XXXX-XXXX-XXXX'}
+                              </strong>
+                            </p>
+                            <p>
+                              Holder Name: <strong className="text-white">{aadhaar?.holderName || u.username}</strong>
+                            </p>
+                          </div>
+
+                          {/* Photos preview */}
+                          <div className="flex gap-2">
+                            {aadhaar?.frontImage && (
+                              <div
+                                onClick={() =>
+                                  setPreviewKycImage({
+                                    url: aadhaar.frontImage!,
+                                    title: `${u.username} - Aadhaar Front`,
+                                  })
+                                }
+                                className="w-20 h-14 rounded-lg overflow-hidden border border-stone-700 cursor-pointer relative group"
+                              >
+                                <img
+                                  src={aadhaar.frontImage}
+                                  alt="Aadhaar Front"
+                                  className="w-full h-full object-cover"
+                                />
+                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center text-[10px] text-white font-bold transition-opacity">
+                                  <Eye className="w-3.5 h-3.5 mr-0.5" /> View
+                                </div>
+                              </div>
+                            )}
+
+                            {aadhaar?.backImage && (
+                              <div
+                                onClick={() =>
+                                  setPreviewKycImage({
+                                    url: aadhaar.backImage!,
+                                    title: `${u.username} - Aadhaar Back`,
+                                  })
+                                }
+                                className="w-20 h-14 rounded-lg overflow-hidden border border-stone-700 cursor-pointer relative group"
+                              >
+                                <img
+                                  src={aadhaar.backImage}
+                                  alt="Aadhaar Back"
+                                  className="w-full h-full object-cover"
+                                />
+                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center text-[10px] text-white font-bold transition-opacity">
+                                  <Eye className="w-3.5 h-3.5 mr-0.5" /> View
+                                </div>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Aadhaar Actions */}
+                          <div className="flex items-center gap-1.5 pt-1 border-t border-stone-800">
+                            <button
+                              onClick={() => {
+                                sounds.playWinFanfare();
+                                adminApproveKycDoc(u.id, 'AADHAAR');
+                              }}
+                              className="flex-1 py-1 bg-emerald-600/80 hover:bg-emerald-600 text-white font-bold text-[10px] rounded-lg transition-colors flex items-center justify-center gap-1"
+                            >
+                              <CheckCircle2 className="w-3 h-3" /> Approve Aadhaar
+                            </button>
+                            <button
+                              onClick={() => {
+                                const reason = prompt('Enter rejection reason for Aadhaar:', 'Aadhaar image blurry or unreadable');
+                                if (reason) adminRejectKycDoc(u.id, 'AADHAAR', reason);
+                              }}
+                              className="px-2 py-1 bg-rose-950/80 hover:bg-rose-900 border border-rose-800 text-rose-300 font-bold text-[10px] rounded-lg transition-colors"
+                            >
+                              Reject
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* PAN Card Box */}
+                        <div className="bg-stone-950 p-3.5 rounded-xl border border-stone-800/80 space-y-2.5">
+                          <div className="flex items-center justify-between pb-1.5 border-b border-stone-800">
+                            <span className="font-bold text-xs text-white">PAN Card (10 Chars)</span>
+                            <span
+                              className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                pan?.status === 'VERIFIED'
+                                  ? 'bg-emerald-950 text-emerald-400 border border-emerald-500/40'
+                                  : pan?.status === 'REJECTED'
+                                  ? 'bg-rose-950 text-rose-400 border border-rose-500/40'
+                                  : 'bg-amber-950 text-amber-300 border border-amber-500/40'
+                              }`}
+                            >
+                              {pan?.status || 'PENDING'}
+                            </span>
+                          </div>
+
+                          <div className="text-[11px] space-y-1 text-stone-300">
+                            <p>
+                              Number:{' '}
+                              <strong className="font-mono text-white">
+                                {pan?.documentNumber || 'ABCDE1234F'}
+                              </strong>
+                            </p>
+                            <p>
+                              Holder Name: <strong className="text-white">{pan?.holderName || u.username}</strong>
+                            </p>
+                            {pan?.dob && (
+                              <p>
+                                DOB: <strong className="text-white">{pan.dob}</strong>
+                              </p>
+                            )}
+                          </div>
+
+                          {pan?.frontImage && (
+                            <div
+                              onClick={() =>
+                                setPreviewKycImage({
+                                  url: pan.frontImage!,
+                                  title: `${u.username} - PAN Card Front`,
+                                })
+                              }
+                              className="w-20 h-14 rounded-lg overflow-hidden border border-stone-700 cursor-pointer relative group"
+                            >
+                              <img
+                                src={pan.frontImage}
+                                alt="PAN Front"
+                                className="w-full h-full object-cover"
+                              />
+                              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center text-[10px] text-white font-bold transition-opacity">
+                                <Eye className="w-3.5 h-3.5 mr-0.5" /> View
+                              </div>
+                            </div>
+                          )}
+
+                          {/* PAN Actions */}
+                          <div className="flex items-center gap-1.5 pt-1 border-t border-stone-800">
+                            <button
+                              onClick={() => {
+                                sounds.playWinFanfare();
+                                adminApproveKycDoc(u.id, 'PAN');
+                              }}
+                              className="flex-1 py-1 bg-emerald-600/80 hover:bg-emerald-600 text-white font-bold text-[10px] rounded-lg transition-colors flex items-center justify-center gap-1"
+                            >
+                              <CheckCircle2 className="w-3 h-3" /> Approve PAN
+                            </button>
+                            <button
+                              onClick={() => {
+                                const reason = prompt('Enter rejection reason for PAN:', 'PAN mismatch or unreadable');
+                                if (reason) adminRejectKycDoc(u.id, 'PAN', reason);
+                              }}
+                              className="px-2 py-1 bg-rose-950/80 hover:bg-rose-900 border border-rose-800 text-rose-300 font-bold text-[10px] rounded-lg transition-colors"
+                            >
+                              Reject
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Modal: Full Size Card Image Preview */}
+        {previewKycImage && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4">
+            <div className="bg-stone-900 border border-stone-700 rounded-2xl max-w-lg w-full overflow-hidden shadow-2xl">
+              <div className="p-3 bg-stone-800 flex items-center justify-between">
+                <span className="text-xs font-bold text-white">{previewKycImage.title}</span>
+                <button
+                  onClick={() => setPreviewKycImage(null)}
+                  className="p-1 rounded-full text-stone-400 hover:text-white"
+                >
+                  <XCircle className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="p-4 bg-stone-950 flex items-center justify-center max-h-[70vh] overflow-auto">
+                <img
+                  src={previewKycImage.url}
+                  alt={previewKycImage.title}
+                  className="max-w-full max-h-[60vh] object-contain rounded-lg border border-stone-800"
+                />
+              </div>
+              <div className="p-3 bg-stone-800 text-right">
+                <button
+                  onClick={() => setPreviewKycImage(null)}
+                  className="px-4 py-1.5 bg-stone-700 hover:bg-stone-600 text-white font-bold text-xs rounded-lg"
+                >
+                  Close Preview
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ============================================================== */}
+        {/* TAB 6: PLAYERS & USERS DIRECTORY */}
+        {/* ============================================================== */}
+        {activeTab === 'USERS' && (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-stone-800">
+              <div>
+                <h2 className="text-base font-black text-white flex items-center gap-2">
+                  <Users className="w-5 h-5 text-amber-400" />
+                  <span>PLAYERS DIRECTORY & WALLET CONTROL</span>
+                </h2>
+                <p className="text-xs text-stone-400 mt-0.5">
+                  Search players, inspect balances, modify deposits/withdrawals, or toggle account bans.
+                </p>
+              </div>
             </div>
 
-            {/* Adjust Balance Modal */}
+            {/* User Search */}
+            <div className="relative">
+              <Search className="w-4 h-4 absolute left-3 top-3 text-stone-500" />
+              <input
+                type="text"
+                value={userSearch}
+                onChange={(e) => setUserSearch(e.target.value)}
+                placeholder="Search players by username, phone number, WhatsApp, or ID..."
+                className="w-full bg-stone-900 border border-stone-800 rounded-xl pl-9 pr-3 py-2 text-xs text-stone-100 placeholder-stone-500"
+              />
+            </div>
+
+            {/* Users Table */}
+            <div className="bg-stone-900 border border-stone-800 rounded-2xl overflow-hidden shadow-sm">
+              <div className="overflow-x-auto no-scrollbar">
+                <table className="w-full text-left text-xs text-stone-300">
+                  <thead className="bg-stone-950 text-stone-400 text-[10px] uppercase font-bold">
+                    <tr>
+                      <th className="p-3">Player</th>
+                      <th className="p-3">Deposit Bal</th>
+                      <th className="p-3">Withdrawal Bal</th>
+                      <th className="p-3">Bonus</th>
+                      <th className="p-3">KYC Status</th>
+                      <th className="p-3">Status</th>
+                      <th className="p-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-stone-800">
+                    {filteredUsers.map((u) => (
+                      <tr key={u.id} className="hover:bg-stone-800/40">
+                        <td className="p-3">
+                          <div className="flex items-center gap-2.5">
+                            <img
+                              src={u.avatar}
+                              alt={u.username}
+                              className="w-8 h-8 rounded-full object-cover border border-stone-700"
+                            />
+                            <div>
+                              <span className="font-extrabold text-white block">{u.username}</span>
+                              <span className="text-[10px] text-stone-500 font-mono">
+                                Phone: {u.phone || 'N/A'} · WhatsApp: {u.whatsappNumber || 'N/A'}
+                              </span>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="p-3 font-mono font-bold text-emerald-400">₹{u.depositBalance}</td>
+                        <td className="p-3 font-mono font-bold text-amber-300">₹{u.withdrawalBalance}</td>
+                        <td className="p-3 font-mono text-stone-400">₹{u.bonusBalance}</td>
+                        <td className="p-3">
+                          {u.isKycVerified || u.kycDetails?.overallStatus === 'VERIFIED' ? (
+                            <span className="bg-emerald-950 text-emerald-300 text-[10px] font-bold px-2 py-0.5 rounded-full border border-emerald-500/30">
+                              VERIFIED
+                            </span>
+                          ) : (
+                            <span className="bg-amber-950 text-amber-300 text-[10px] font-bold px-2 py-0.5 rounded-full border border-amber-500/30">
+                              PENDING
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-3">
+                          {u.isBanned ? (
+                            <span className="bg-rose-950 text-rose-300 text-[10px] font-bold px-2 py-0.5 rounded-full border border-rose-500/30">
+                              BANNED
+                            </span>
+                          ) : (
+                            <span className="text-emerald-400 font-bold text-[10px]">ACTIVE</span>
+                          )}
+                        </td>
+                        <td className="p-3 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              onClick={() => {
+                                setSelectedUserForBalance(u.id);
+                                sounds.playCardClick();
+                              }}
+                              className="px-2.5 py-1 bg-stone-800 hover:bg-stone-700 text-stone-200 font-bold text-[10px] rounded-lg border border-stone-700"
+                            >
+                              Edit Balance
+                            </button>
+                            <button
+                              onClick={() => {
+                                adminToggleUserBan(u.id);
+                              }}
+                              className={`px-2.5 py-1 font-bold text-[10px] rounded-lg transition-colors ${
+                                u.isBanned
+                                  ? 'bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border border-emerald-800'
+                                  : 'bg-rose-950 hover:bg-rose-900 text-rose-300 border border-rose-800'
+                              }`}
+                            >
+                              {u.isBanned ? 'Unban' : 'Ban'}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Modal: Edit User Balances */}
             {selectedUserForBalance && (
               <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xs p-4">
-                <div className="bg-stone-900 border border-stone-700 rounded-2xl p-5 max-w-sm w-full space-y-4">
-                  <h3 className="font-extrabold text-sm text-white">
-                    Adjust Player Wallet Balances
-                  </h3>
+                <div className="bg-stone-900 border border-stone-700 rounded-3xl max-w-sm w-full p-5 space-y-4 shadow-2xl">
+                  <div className="flex items-center justify-between pb-2 border-b border-stone-800">
+                    <h3 className="font-extrabold text-sm text-white">Adjust User Balance</h3>
+                    <button
+                      onClick={() => setSelectedUserForBalance(null)}
+                      className="text-stone-400 hover:text-white"
+                    >
+                      <XCircle className="w-5 h-5" />
+                    </button>
+                  </div>
+
                   <div className="space-y-3 text-xs">
                     <div>
-                      <label className="text-stone-400 block mb-1">Deposit Cash (₹ Delta):</label>
+                      <label className="text-stone-400 block mb-1">Add to Deposit Balance (₹)</label>
                       <input
                         type="number"
                         value={depositDelta}
                         onChange={(e) => setDepositDelta(Number(e.target.value))}
-                        className="w-full bg-stone-950 border border-stone-700 rounded-lg p-2 font-mono"
+                        className="w-full bg-stone-950 border border-stone-700 rounded-xl p-2 text-stone-100 font-mono"
                       />
                     </div>
                     <div>
-                      <label className="text-stone-400 block mb-1">Withdrawal Cash (₹ Delta):</label>
+                      <label className="text-stone-400 block mb-1">Add to Withdrawal Balance (₹)</label>
                       <input
                         type="number"
                         value={withdrawalDelta}
                         onChange={(e) => setWithdrawalDelta(Number(e.target.value))}
-                        className="w-full bg-stone-950 border border-stone-700 rounded-lg p-2 font-mono"
+                        className="w-full bg-stone-950 border border-stone-700 rounded-xl p-2 text-stone-100 font-mono"
                       />
                     </div>
                     <div>
-                      <label className="text-stone-400 block mb-1">Bonus Cash (₹ Delta):</label>
+                      <label className="text-stone-400 block mb-1">Add to Bonus Balance (₹)</label>
                       <input
                         type="number"
                         value={bonusDelta}
                         onChange={(e) => setBonusDelta(Number(e.target.value))}
-                        className="w-full bg-stone-950 border border-stone-700 rounded-lg p-2 font-mono"
+                        className="w-full bg-stone-950 border border-stone-700 rounded-xl p-2 text-stone-100 font-mono"
                       />
                     </div>
                   </div>
 
                   <div className="flex gap-2 pt-2">
                     <button
-                      onClick={() => setSelectedUserForBalance(null)}
-                      className="flex-1 py-2 bg-stone-800 text-stone-300 font-bold text-xs rounded-xl"
-                    >
-                      CANCEL
-                    </button>
-                    <button
                       onClick={() => {
                         adminModifyUserBalance(selectedUserForBalance, depositDelta, withdrawalDelta, bonusDelta);
                         setSelectedUserForBalance(null);
-                        alert('Balances updated successfully!');
                       }}
-                      className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs rounded-xl"
+                      className="flex-1 py-2 bg-gradient-to-r from-emerald-600 to-green-500 text-white font-extrabold text-xs uppercase rounded-xl shadow-md"
                     >
-                      APPLY CHANGES
+                      Save Balance
+                    </button>
+                    <button
+                      onClick={() => setSelectedUserForBalance(null)}
+                      className="px-4 py-2 bg-stone-800 text-stone-300 font-bold text-xs rounded-xl"
+                    >
+                      Cancel
                     </button>
                   </div>
                 </div>
@@ -802,10 +1799,560 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onSwitchToPlayer }) => {
           </div>
         )}
 
-        {/* TAB 4: TOURNAMENTS MANAGER */}
+        {/* ============================================================== */}
+        {/* TAB 7: SUPABASE BACKEND CONSOLE */}
+        {/* ============================================================== */}
+        {activeTab === 'SUPABASE' && (
+          <div className="bg-stone-900 border border-stone-800 rounded-2xl p-5 shadow-sm space-y-5">
+            {/* Supabase Header */}
+            <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-stone-800">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shadow-md">
+                  <Database className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-base font-black text-white tracking-wide">
+                      SUPABASE MULTIPLAYER BACKEND MISSION CONTROL
+                    </h2>
+                    <span
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                        supabaseConfig.isConfigured
+                          ? 'bg-emerald-950/80 text-emerald-400 border-emerald-500/40'
+                          : 'bg-amber-950/80 text-amber-300 border-amber-500/40'
+                      }`}
+                    >
+                      {supabaseConfig.isConfigured ? 'Configured' : 'Setup Required'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-stone-400 mt-0.5">
+                    PostgreSQL 15 · Supabase Realtime Channels · Row Level Security (RLS) · Rule Engine · Migration SQL
+                  </p>
+                </div>
+              </div>
+
+              {/* Ping / Test Latency Button */}
+              <button
+                type="button"
+                disabled={sbIsTesting}
+                onClick={handleTestSbConnection}
+                className="px-3.5 py-1.5 bg-stone-800 hover:bg-stone-700 text-stone-200 font-bold text-xs rounded-xl border border-stone-700 flex items-center gap-1.5 transition-colors"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${sbIsTesting ? 'animate-spin text-emerald-400' : ''}`} />
+                <span>{sbIsTesting ? 'Testing Latency...' : 'Ping Supabase'}</span>
+              </button>
+            </div>
+
+            {/* Supabase Sub-Tabs */}
+            <div className="flex border-b border-stone-800 bg-stone-950/60 rounded-xl p-1 text-xs font-bold gap-1 overflow-x-auto no-scrollbar">
+              <button
+                type="button"
+                onClick={() => {
+                  sounds.playCardClick();
+                  setSbSubTab('CONNECTION');
+                }}
+                className={`flex-1 min-w-[120px] py-2 rounded-lg transition-colors flex items-center justify-center gap-1.5 ${
+                  sbSubTab === 'CONNECTION' ? 'bg-emerald-600 text-white shadow-xs' : 'text-stone-400 hover:text-stone-200'
+                }`}
+              >
+                <Wifi className="w-3.5 h-3.5" />
+                <span>Connection & Keys</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  sounds.playCardClick();
+                  setSbSubTab('TABLES');
+                  handleFetchTableRows(selectedInspectorTable);
+                }}
+                className={`flex-1 min-w-[120px] py-2 rounded-lg transition-colors flex items-center justify-center gap-1.5 ${
+                  sbSubTab === 'TABLES' ? 'bg-emerald-600 text-white shadow-xs' : 'text-stone-400 hover:text-stone-200'
+                }`}
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span>Tables Inspector</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  sounds.playCardClick();
+                  setSbSubTab('MIGRATIONS');
+                }}
+                className={`flex-1 min-w-[120px] py-2 rounded-lg transition-colors flex items-center justify-center gap-1.5 ${
+                  sbSubTab === 'MIGRATIONS' ? 'bg-emerald-600 text-white shadow-xs' : 'text-stone-400 hover:text-stone-200'
+                }`}
+              >
+                <Server className="w-3.5 h-3.5" />
+                <span>SQL Migrations</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  sounds.playCardClick();
+                  setSbSubTab('ROLES');
+                }}
+                className={`flex-1 min-w-[120px] py-2 rounded-lg transition-colors flex items-center justify-center gap-1.5 ${
+                  sbSubTab === 'ROLES' ? 'bg-emerald-600 text-white shadow-xs' : 'text-stone-400 hover:text-stone-200'
+                }`}
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>Admin Auth & Roles</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  sounds.playCardClick();
+                  setSbSubTab('REALTIME');
+                }}
+                className={`flex-1 min-w-[120px] py-2 rounded-lg transition-colors flex items-center justify-center gap-1.5 ${
+                  sbSubTab === 'REALTIME' ? 'bg-emerald-600 text-white shadow-xs' : 'text-stone-400 hover:text-stone-200'
+                }`}
+              >
+                <Radio className="w-3.5 h-3.5" />
+                <span>Realtime & 2P Guide</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  sounds.playCardClick();
+                  setSbSubTab('TESTS');
+                  setSbEngineResults(runRummyEngineTests());
+                }}
+                className={`flex-1 min-w-[120px] py-2 rounded-lg transition-colors flex items-center justify-center gap-1.5 ${
+                  sbSubTab === 'TESTS' ? 'bg-emerald-600 text-white shadow-xs' : 'text-stone-400 hover:text-stone-200'
+                }`}
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Rule Engine Tests</span>
+              </button>
+            </div>
+
+            {/* SUB-TAB 1: CONNECTION & CREDENTIALS */}
+            {sbSubTab === 'CONNECTION' && (
+              <div className="space-y-4">
+                {/* Live Latency Status Banner */}
+                <div
+                  className={`p-3.5 rounded-2xl border flex items-center justify-between text-xs font-semibold ${
+                    sbTestResult?.success
+                      ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-300'
+                      : sbTestResult && !sbTestResult.success
+                      ? 'bg-rose-950/40 border-rose-500/50 text-rose-300'
+                      : supabaseConfig.isConfigured
+                      ? 'bg-stone-950/60 border-stone-800 text-stone-300'
+                      : 'bg-amber-950/40 border-amber-500/40 text-amber-300'
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <span
+                      className={`w-3 h-3 rounded-full shrink-0 ${
+                        sbTestResult?.success
+                          ? 'bg-emerald-400 animate-pulse'
+                          : sbTestResult && !sbTestResult.success
+                          ? 'bg-rose-400'
+                          : supabaseConfig.isConfigured
+                          ? 'bg-cyan-400'
+                          : 'bg-amber-400'
+                      }`}
+                    />
+                    <div>
+                      <p className="font-extrabold text-white text-xs">
+                        {sbTestResult
+                          ? sbTestResult.success
+                            ? 'Supabase Connection Live & Operational'
+                            : 'Connection Test Failed'
+                          : supabaseConfig.isConfigured
+                          ? 'Supabase Credentials Present — Ready for Testing'
+                          : 'Supabase URL and Anon Public Key are not configured yet'}
+                      </p>
+                      {sbTestResult?.message && (
+                        <p className="text-[11px] opacity-80 mt-0.5">{sbTestResult.message}</p>
+                      )}
+                    </div>
+                  </div>
+
+                  {sbTestResult?.latencyMs && (
+                    <span className="font-mono text-[11px] bg-black/40 px-2 py-0.5 rounded-lg border border-white/10">
+                      {sbTestResult.latencyMs} ms latency
+                    </span>
+                  )}
+                </div>
+
+                {/* Form to enter Supabase URL and Key */}
+                <form onSubmit={handleSaveSbConfig} className="bg-stone-950/80 border border-stone-800 rounded-2xl p-4 space-y-3.5">
+                  <div>
+                    <label className="text-[11px] uppercase font-bold text-stone-400 block mb-1">
+                      Supabase Project URL
+                    </label>
+                    <input
+                      type="url"
+                      value={sbUrlInput}
+                      onChange={(e) => setSbUrlInput(e.target.value)}
+                      placeholder="https://xyzcompany.supabase.co"
+                      className="w-full bg-stone-900 border border-stone-700 rounded-xl px-3 py-2 text-stone-100 font-mono text-xs focus:outline-hidden focus:border-emerald-500"
+                    />
+                    <span className="text-[10px] text-stone-500 mt-1 block">
+                      Found in: Supabase Dashboard &gt; Project Settings &gt; API &gt; Project URL
+                    </span>
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-[11px] uppercase font-bold text-stone-400 block">
+                        Supabase Anon Public API Key
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setSbShowKey(!sbShowKey)}
+                        className="text-[10px] text-emerald-400 hover:text-emerald-300 font-bold"
+                      >
+                        {sbShowKey ? 'Hide Key' : 'Reveal Key'}
+                      </button>
+                    </div>
+                    <input
+                      type={sbShowKey ? 'text' : 'password'}
+                      value={sbKeyInput}
+                      onChange={(e) => setSbKeyInput(e.target.value)}
+                      placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                      className="w-full bg-stone-900 border border-stone-700 rounded-xl px-3 py-2 text-stone-100 font-mono text-xs focus:outline-hidden focus:border-emerald-500"
+                    />
+                    <span className="text-[10px] text-stone-500 mt-1 block">
+                      Found in: Supabase Dashboard &gt; Project Settings &gt; API &gt; Project API keys (anon public)
+                    </span>
+                  </div>
+
+                  <div className="flex gap-2 pt-2">
+                    <button
+                      type="submit"
+                      className="flex-1 py-2.5 bg-gradient-to-r from-emerald-600 to-green-500 hover:from-emerald-500 hover:to-green-400 text-white font-extrabold text-xs rounded-xl shadow-md transition-all active:scale-95"
+                    >
+                      Save & Apply Supabase Credentials
+                    </button>
+                    {supabaseConfig.isConfigured && (
+                      <button
+                        type="button"
+                        onClick={handleClearSbConfig}
+                        className="px-4 py-2.5 bg-stone-800 hover:bg-stone-700 text-stone-300 font-bold text-xs rounded-xl transition-colors"
+                      >
+                        Reset
+                      </button>
+                    )}
+                  </div>
+                </form>
+              </div>
+            )}
+
+            {/* SUB-TAB 2: TABLES INSPECTOR & LIVE EXPLORER */}
+            {sbSubTab === 'TABLES' && (
+              <div className="space-y-4 text-xs">
+                {/* Tables Selector Grid */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {SUPABASE_TABLES_META.map((meta) => (
+                    <button
+                      key={meta.name}
+                      onClick={() => handleFetchTableRows(meta.name)}
+                      className={`p-3 rounded-xl border text-left transition-all ${
+                        selectedInspectorTable === meta.name
+                          ? 'bg-emerald-950/60 border-emerald-500/60 text-white shadow-xs'
+                          : 'bg-stone-950 border-stone-800 text-stone-400 hover:border-stone-700'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="font-mono font-bold text-white text-xs">{meta.name}</span>
+                        {meta.hasRealtime && (
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                        )}
+                      </div>
+                      <span className="text-[10px] text-stone-400 block line-clamp-1">{meta.description}</span>
+                    </button>
+                  ))}
+                </div>
+
+                {/* Table Details & Live Data */}
+                <div className="bg-stone-950 border border-stone-800 rounded-xl p-4 space-y-3">
+                  <div className="flex items-center justify-between pb-2 border-b border-stone-800">
+                    <div>
+                      <h4 className="font-bold text-white text-xs font-mono">
+                        Table: public.{selectedInspectorTable}
+                      </h4>
+                      <p className="text-[10px] text-stone-400 mt-0.5">
+                        {SUPABASE_TABLES_META.find((m) => m.name === selectedInspectorTable)?.description}
+                      </p>
+                    </div>
+
+                    <button
+                      onClick={() => handleFetchTableRows(selectedInspectorTable)}
+                      disabled={isLoadingRows}
+                      className="px-2.5 py-1 bg-stone-800 hover:bg-stone-700 text-stone-300 font-bold text-[10px] rounded-lg border border-stone-700 flex items-center gap-1"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${isLoadingRows ? 'animate-spin' : ''}`} />
+                      Fetch Latest
+                    </button>
+                  </div>
+
+                  {/* Rows Render */}
+                  {isLoadingRows ? (
+                    <div className="p-8 text-center text-stone-400">Loading records from Supabase...</div>
+                  ) : tableLiveRows.length === 0 ? (
+                    <div className="p-6 text-center text-stone-500 font-mono text-xs">
+                      No rows returned for {selectedInspectorTable}. (Table is either empty or awaiting user activity).
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto max-h-60 no-scrollbar">
+                      <pre className="text-[10px] font-mono text-emerald-300 leading-relaxed bg-stone-900 p-3 rounded-lg border border-stone-800 overflow-x-auto">
+                        {JSON.stringify(tableLiveRows, null, 2)}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* SUB-TAB 3: SQL MIGRATIONS & SCRIPTS */}
+            {sbSubTab === 'MIGRATIONS' && (
+              <div className="space-y-4 text-xs">
+                {/* Script Selector */}
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex bg-stone-950 p-1 rounded-xl border border-stone-800 gap-1">
+                    <button
+                      onClick={() => setSelectedMigration('UNIFIED')}
+                      className={`px-3 py-1.5 rounded-lg font-bold text-xs ${
+                        selectedMigration === 'UNIFIED'
+                          ? 'bg-emerald-600 text-white'
+                          : 'text-stone-400 hover:text-stone-200'
+                      }`}
+                    >
+                      Complete Unified Schema (Recommended)
+                    </button>
+                    <button
+                      onClick={() => setSelectedMigration('CORE')}
+                      className={`px-3 py-1.5 rounded-lg font-bold text-xs ${
+                        selectedMigration === 'CORE'
+                          ? 'bg-emerald-600 text-white'
+                          : 'text-stone-400 hover:text-stone-200'
+                      }`}
+                    >
+                      Migration 1: Core Multiplayer
+                    </button>
+                    <button
+                      onClick={() => setSelectedMigration('MULTIMODE')}
+                      className={`px-3 py-1.5 rounded-lg font-bold text-xs ${
+                        selectedMigration === 'MULTIMODE'
+                          ? 'bg-emerald-600 text-white'
+                          : 'text-stone-400 hover:text-stone-200'
+                      }`}
+                    >
+                      Migration 2: Multi-Mode
+                    </button>
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      sounds.playCardClick();
+                      const script =
+                        selectedMigration === 'UNIFIED'
+                          ? UNIFIED_MASTER_SQL
+                          : selectedMigration === 'CORE'
+                          ? CORE_MULTIPLAYER_SQL
+                          : MULTI_MODE_SQL;
+                      navigator.clipboard.writeText(script);
+                      setSbCopiedSql(true);
+                      setTimeout(() => setSbCopiedSql(false), 2000);
+                    }}
+                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs rounded-xl flex items-center gap-1.5 shadow-sm"
+                  >
+                    {sbCopiedSql ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{sbCopiedSql ? 'Copied to Clipboard!' : 'Copy SQL Script'}</span>
+                  </button>
+                </div>
+
+                {/* Instructions */}
+                <div className="p-3 bg-stone-950 border border-stone-800 rounded-xl text-stone-300 text-[11px] leading-relaxed">
+                  <strong>How to Run in Supabase:</strong> Open your Supabase Project Dashboard &gt; Navigate to <strong>SQL Editor</strong> on the left sidebar &gt; Click <strong>New Query</strong> &gt; Paste the copied SQL script &gt; Click <strong>Run</strong> (▶️). All 8 tables, triggers, RLS policies, and realtime publications will be created instantly.
+                </div>
+
+                {/* Code Preview */}
+                <div className="bg-stone-950 p-4 rounded-xl border border-stone-800 font-mono text-[11px] text-stone-300 overflow-x-auto max-h-80 leading-relaxed no-scrollbar">
+                  <pre className="whitespace-pre">
+                    {selectedMigration === 'UNIFIED'
+                      ? UNIFIED_MASTER_SQL
+                      : selectedMigration === 'CORE'
+                      ? CORE_MULTIPLAYER_SQL
+                      : MULTI_MODE_SQL}
+                  </pre>
+                </div>
+              </div>
+            )}
+
+            {/* SUB-TAB 4: ADMIN AUTH & ROLES */}
+            {sbSubTab === 'ROLES' && (
+              <div className="space-y-4 text-xs">
+                <div className="bg-stone-950 border border-stone-800 rounded-xl p-4 space-y-3">
+                  <h4 className="font-extrabold text-sm text-amber-300 flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-amber-400" />
+                    <span>Authorized Administrator Emails & Security Keys</span>
+                  </h4>
+                  <p className="text-[11px] text-stone-400">
+                    Accounts with these emails or database roles automatically receive Admin Suite permissions.
+                  </p>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
+                    <div className="bg-stone-900 p-3 rounded-lg border border-stone-800">
+                      <span className="text-[10px] text-stone-400 uppercase font-bold block mb-1">
+                        Verified Admin Emails
+                      </span>
+                      <ul className="space-y-1 font-mono text-emerald-400 text-xs">
+                        {AUTHORIZED_ADMIN_EMAILS.map((em) => (
+                          <li key={em}>• {em}</li>
+                        ))}
+                      </ul>
+                    </div>
+
+                    <div className="bg-stone-900 p-3 rounded-lg border border-stone-800">
+                      <span className="text-[10px] text-stone-400 uppercase font-bold block mb-1">
+                        Master Security Passwords
+                      </span>
+                      <ul className="space-y-1 font-mono text-amber-300 text-xs">
+                        <li>• MasterAdmin@2026</li>
+                        <li>• AdminPass@611</li>
+                        <li>• admin123</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Admin SQL Promotion Snippets */}
+                <div className="bg-stone-950 border border-stone-800 rounded-xl p-4 space-y-3">
+                  <h4 className="font-extrabold text-sm text-white">Useful Supabase Admin SQL Snippets</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {ADMIN_SQL_SNIPPETS.map((snip, idx) => (
+                      <div key={idx} className="bg-stone-900 p-3 rounded-xl border border-stone-800 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-white text-xs">{snip.title}</span>
+                          <button
+                            onClick={() => {
+                              sounds.playCardClick();
+                              navigator.clipboard.writeText(snip.sql);
+                              alert('Snippet copied to clipboard!');
+                            }}
+                            className="p-1 hover:text-white text-stone-400"
+                          >
+                            <Copy className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                        <p className="text-[10px] text-stone-400">{snip.description}</p>
+                        <pre className="bg-stone-950 p-2 rounded-lg font-mono text-[10px] text-emerald-300 overflow-x-auto">
+                          {snip.sql}
+                        </pre>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* SUB-TAB 5: REALTIME & 2-DEVICE MATCHMAKING GUIDE */}
+            {sbSubTab === 'REALTIME' && (
+              <div className="space-y-4 text-xs text-stone-300">
+                <div className="bg-emerald-950/30 border border-emerald-800/50 rounded-2xl p-4 space-y-3">
+                  <h3 className="font-black text-emerald-300 text-sm uppercase tracking-wide flex items-center gap-2">
+                    <Radio className="w-4 h-4 text-emerald-400" />
+                    <span>How Real-Time Multiplayer Operates:</span>
+                  </h3>
+                  <div className="space-y-2 text-xs leading-relaxed text-stone-300">
+                    <p>
+                      <strong>Channels Architecture:</strong> Each game room broadcasts over{' '}
+                      <code className="bg-black/40 px-1.5 py-0.5 rounded text-amber-300 font-mono">
+                        realtime:room:ROOM_CODE
+                      </code>{' '}
+                      and active gameplay moves sync across{' '}
+                      <code className="bg-black/40 px-1.5 py-0.5 rounded text-amber-300 font-mono">
+                        realtime:game:SESSION_ID
+                      </code>.
+                    </p>
+                    <p>
+                      <strong>Card Privacy & Anti-Cheat:</strong> Private cards in{' '}
+                      <code className="text-emerald-300 font-mono">player_game_states</code> are protected by Supabase Row Level Security (RLS). A player can never inspect their opponent&apos;s cards over the network.
+                    </p>
+                  </div>
+                </div>
+
+                {/* 2-Device Multiplayer Step-by-Step */}
+                <div className="bg-stone-950 border border-stone-800 rounded-2xl p-4 space-y-2.5">
+                  <h4 className="font-bold text-white text-xs uppercase tracking-wider text-amber-400">
+                    Testing 2-Player Match Across 2 Devices or Incognito Tabs:
+                  </h4>
+                  <ol className="list-decimal pl-5 space-y-1.5 text-xs text-stone-300 leading-relaxed">
+                    <li>
+                      <strong>Device 1 (Host Room):</strong> Open player app, choose <strong>&quot;2 Players&quot;</strong> in the Lobby, and tap <strong>PLAY NOW</strong>.
+                    </li>
+                    <li>
+                      <strong>Device 2 or Second Browser Window:</strong> Open the same URL in an Incognito window or mobile browser.
+                    </li>
+                    <li>
+                      Tap <strong>PLAY NOW</strong>. The matchmaking engine pairs the two devices into the same real-time table!
+                    </li>
+                    <li>
+                      Cards deal simultaneously on both screens. Player 1&apos;s moves, draws, and discards reflect live on Player 2&apos;s screen!
+                    </li>
+                  </ol>
+                </div>
+              </div>
+            )}
+
+            {/* SUB-TAB 6: SERVER ENGINE UNIT TESTS */}
+            {sbSubTab === 'TESTS' && (
+              <div className="space-y-3 text-xs">
+                <div className="flex items-center justify-between pb-1">
+                  <span className="font-extrabold text-stone-200">
+                    Rummy Rules & Win Detection Validation Suite
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] bg-emerald-900/60 text-emerald-300 px-2.5 py-0.5 rounded-full font-bold border border-emerald-500/40">
+                      {sbEngineResults.filter((t) => t.passed).length}/{sbEngineResults.length} PASSED
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setSbEngineResults(runRummyEngineTests())}
+                      className="px-2.5 py-1 bg-stone-800 hover:bg-stone-700 text-stone-300 font-bold text-[11px] rounded-lg"
+                    >
+                      Re-run Tests
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  {sbEngineResults.map((t, idx) => (
+                    <div
+                      key={idx}
+                      className="bg-stone-950 p-3 rounded-xl border border-stone-800 flex items-start gap-2.5 text-xs"
+                    >
+                      {t.passed ? (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                      ) : (
+                        <XCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="font-extrabold text-stone-200">{t.name}</p>
+                        {t.message && <p className="text-[11px] text-stone-400 mt-0.5">{t.message}</p>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ============================================================== */}
+        {/* TAB 8: TOURNAMENTS MANAGER */}
+        {/* ============================================================== */}
         {activeTab === 'TOURNAMENTS' && (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {/* Create Tournament Form */}
             <div className="bg-stone-900 border border-stone-800 rounded-2xl p-5 shadow-sm space-y-4 md:col-span-1">
               <h3 className="font-extrabold text-sm text-white flex items-center gap-2 pb-2 border-b border-stone-800">
                 <Plus className="w-4 h-4 text-emerald-400" />
@@ -886,44 +2433,35 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onSwitchToPlayer }) => {
                   }}
                   className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold rounded-xl shadow-md uppercase transition-colors"
                 >
-                  PUBLISH TO LOBBY
+                  Publish Tournament
                 </button>
               </div>
             </div>
 
-            {/* Existing Tournaments List */}
             <div className="bg-stone-900 border border-stone-800 rounded-2xl p-5 shadow-sm space-y-3 md:col-span-2">
-              <h3 className="font-extrabold text-sm text-white pb-2 border-b border-stone-800">
-                Scheduled Tournaments ({tournaments.length})
+              <h3 className="font-extrabold text-sm text-white flex items-center gap-2 pb-2 border-b border-stone-800">
+                <Trophy className="w-4 h-4 text-amber-400" />
+                <span>Active Tournaments Roster</span>
               </h3>
 
-              <div className="space-y-2 max-h-[500px] overflow-y-auto no-scrollbar">
+              <div className="space-y-2.5 max-h-[500px] overflow-y-auto no-scrollbar">
                 {tournaments.map((t) => (
                   <div
                     key={t.id}
-                    className="bg-stone-950 border border-stone-800/80 rounded-xl p-3 flex items-center justify-between text-xs"
+                    className="bg-stone-950 border border-stone-800/80 rounded-xl p-3 flex items-center justify-between gap-3 text-xs"
                   >
                     <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-extrabold text-white text-sm">{t.title}</span>
-                        <span
-                          className={`text-[9px] font-bold px-1.5 py-0.2 rounded ${
-                            t.status === 'FULL' ? 'bg-red-500/20 text-red-300' : 'bg-emerald-500/20 text-emerald-300'
-                          }`}
-                        >
-                          {t.status}
-                        </span>
-                      </div>
-                      <p className="text-stone-400 text-[11px] mt-0.5">
-                        Starts: {t.timeDisplay} · Entry: {t.entryFee === 0 ? 'Free' : `₹${t.entryFee}`}
+                      <h4 className="font-extrabold text-white text-sm">{t.title}</h4>
+                      <p className="text-[11px] text-stone-400">
+                        {t.timeDisplay} · Entry: {t.entryFee === 0 ? 'FREE' : `₹${t.entryFee}`} · Prize: ₹{t.prizePool}
                       </p>
                     </div>
 
                     <div className="text-right">
-                      <p className="font-black text-amber-400 text-sm">₹{t.prizePool}</p>
-                      <p className="text-stone-500 text-[10px]">
+                      <span className="text-emerald-400 font-bold block">
                         {t.joinedCount} / {t.maxParticipants} Registered
-                      </p>
+                      </span>
+                      <span className="text-[10px] text-stone-500 uppercase font-mono">{t.status}</span>
                     </div>
                   </div>
                 ))}
@@ -932,194 +2470,153 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onSwitchToPlayer }) => {
           </div>
         )}
 
-        {/* TAB 5: COUPONS & BONUS */}
-        {activeTab === 'COUPONS' && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {/* Create Coupon */}
-            <div className="bg-stone-900 border border-stone-800 rounded-2xl p-5 shadow-sm space-y-4 md:col-span-1">
+        {/* ============================================================== */}
+        {/* TAB 9: SETTINGS, RAKE & MARKETING */}
+        {/* ============================================================== */}
+        {activeTab === 'SETTINGS' && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* System Economics & House Rake */}
+            <div className="bg-stone-900 border border-stone-800 rounded-2xl p-5 shadow-sm space-y-4">
               <h3 className="font-extrabold text-sm text-white flex items-center gap-2 pb-2 border-b border-stone-800">
-                <Gift className="w-4 h-4 text-amber-400" />
-                <span>Create Promo Coupon</span>
+                <Sliders className="w-4 h-4 text-amber-400" />
+                <span>House Rake & Withdrawal Limits</span>
+              </h3>
+
+              <div className="space-y-4 text-xs">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-stone-400 font-bold">House Rake Commission</label>
+                    <span className="font-mono font-bold text-amber-400 text-sm">{rakeVal}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={1}
+                    max={15}
+                    step={0.5}
+                    value={rakeVal}
+                    onChange={(e) => setRakeVal(Number(e.target.value))}
+                    className="w-full accent-amber-500 cursor-pointer"
+                  />
+                  <span className="text-[10px] text-stone-500">
+                    Industry standard is 3% to 5% deducted on table pots.
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-stone-400 block mb-1 font-bold">Min Withdrawal (₹)</label>
+                    <input
+                      type="number"
+                      value={minWdVal}
+                      onChange={(e) => setMinWdVal(Number(e.target.value))}
+                      className="w-full bg-stone-950 border border-stone-700 rounded-xl p-2 text-stone-100 font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-stone-400 block mb-1 font-bold">Max Withdrawal (₹)</label>
+                    <input
+                      type="number"
+                      value={maxWdVal}
+                      onChange={(e) => setMaxWdVal(Number(e.target.value))}
+                      className="w-full bg-stone-950 border border-stone-700 rounded-xl p-2 text-stone-100 font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-stone-400 block mb-1 font-bold">Welcome Signup Bonus (₹)</label>
+                    <input
+                      type="number"
+                      value={welcomeBonusVal}
+                      onChange={(e) => setWelcomeBonusVal(Number(e.target.value))}
+                      className="w-full bg-stone-950 border border-stone-700 rounded-xl p-2 text-stone-100 font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-stone-400 block mb-1 font-bold">Referral Bonus (₹)</label>
+                    <input
+                      type="number"
+                      value={referralBonusVal}
+                      onChange={(e) => setReferralBonusVal(Number(e.target.value))}
+                      className="w-full bg-stone-950 border border-stone-700 rounded-xl p-2 text-stone-100 font-mono"
+                    />
+                  </div>
+                </div>
+
+                {/* Maintenance Mode Toggle */}
+                <div className="p-3 bg-stone-950 border border-stone-800 rounded-xl flex items-center justify-between">
+                  <div>
+                    <span className="font-bold text-white block">Server Maintenance Mode</span>
+                    <span className="text-[10px] text-stone-400">
+                      Displays maintenance downtime alert on player apps
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => setMaintenanceModeVal(!maintenanceModeVal)}
+                    className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-colors ${
+                      maintenanceModeVal
+                        ? 'bg-rose-600 text-white shadow-xs'
+                        : 'bg-stone-800 text-stone-400 hover:text-white'
+                    }`}
+                  >
+                    {maintenanceModeVal ? 'MAINTENANCE ON' : 'OFF'}
+                  </button>
+                </div>
+
+                <button
+                  onClick={() => {
+                    sounds.playCoinSound();
+                    adminUpdateSettings({
+                      houseRakePercent: rakeVal,
+                      minWithdrawal: minWdVal,
+                      maxWithdrawal: maxWdVal,
+                      welcomeBonus: welcomeBonusVal,
+                      referralBonus: referralBonusVal,
+                      maintenanceMode: maintenanceModeVal,
+                    });
+                    alert('System and economic settings saved!');
+                  }}
+                  className="w-full py-2.5 bg-gradient-to-r from-amber-500 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 text-stone-950 font-black text-xs uppercase rounded-xl shadow-md transition-all active:scale-95"
+                >
+                  Apply System Settings
+                </button>
+              </div>
+            </div>
+
+            {/* Live Broadcast Ticker */}
+            <div className="bg-stone-900 border border-stone-800 rounded-2xl p-5 shadow-sm space-y-4">
+              <h3 className="font-extrabold text-sm text-white flex items-center gap-2 pb-2 border-b border-stone-800">
+                <Bell className="w-4 h-4 text-emerald-400" />
+                <span>Live Broadcast & Player Announcements</span>
               </h3>
 
               <div className="space-y-3 text-xs">
                 <div>
-                  <label className="text-stone-400 block mb-1">Coupon Code</label>
-                  <input
-                    type="text"
-                    value={newCouponCode}
-                    onChange={(e) => setNewCouponCode(e.target.value.toUpperCase())}
-                    placeholder="e.g. VIP200"
-                    className="w-full bg-stone-950 border border-stone-800 rounded-lg p-2 text-amber-300 font-mono font-bold uppercase"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-stone-400 block mb-1">Bonus Percentage (%)</label>
-                  <input
-                    type="number"
-                    value={newCouponPercent}
-                    onChange={(e) => setNewCouponPercent(Number(e.target.value))}
-                    className="w-full bg-stone-950 border border-stone-800 rounded-lg p-2 text-stone-100 font-mono"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-stone-400 block mb-1">Max Bonus Cap (₹)</label>
-                  <input
-                    type="number"
-                    value={newCouponMaxBonus}
-                    onChange={(e) => setNewCouponMaxBonus(Number(e.target.value))}
-                    className="w-full bg-stone-950 border border-stone-800 rounded-lg p-2 text-stone-100 font-mono"
+                  <label className="text-stone-400 block mb-1 font-bold">
+                    Broadcast Message (Ticker across Player Screens)
+                  </label>
+                  <textarea
+                    rows={4}
+                    value={broadcastText}
+                    onChange={(e) => setBroadcastText(e.target.value)}
+                    placeholder="e.g. FLASH TOURNAMENT: 50K Freeroll starts at 7 PM! Register now with zero entry fee!"
+                    className="w-full bg-stone-950 border border-stone-700 rounded-xl p-2.5 text-stone-100"
                   />
                 </div>
 
                 <button
                   onClick={() => {
-                    if (!newCouponCode) return alert('Enter coupon code');
-                    adminAddCoupon({
-                      code: newCouponCode,
-                      bonusPercent: newCouponPercent,
-                      maxBonus: newCouponMaxBonus,
-                      minDeposit: 100,
-                      description: `${newCouponPercent}% deposit match bonus`,
-                      active: true,
-                    });
-                    setNewCouponCode('');
-                    alert('Coupon activated!');
+                    if (!broadcastText.trim()) return;
+                    adminSendBroadcast(broadcastText.trim());
+                    alert('Broadcast notification sent to all active players!');
+                    setBroadcastText('');
                   }}
-                  className="w-full py-2.5 bg-amber-500 hover:bg-amber-400 text-stone-950 font-black rounded-xl uppercase transition-colors"
+                  className="w-full py-2.5 bg-gradient-to-r from-emerald-600 to-green-500 hover:from-emerald-500 hover:to-green-400 text-white font-extrabold text-xs uppercase rounded-xl shadow-md transition-all active:scale-95"
                 >
-                  SAVE & ACTIVATE COUPON
+                  Send Push Broadcast to Players
                 </button>
               </div>
-            </div>
-
-            {/* Active Coupons List */}
-            <div className="bg-stone-900 border border-stone-800 rounded-2xl p-5 shadow-sm space-y-3 md:col-span-2">
-              <h3 className="font-extrabold text-sm text-white pb-2 border-b border-stone-800">
-                Active Promotional Vouchers
-              </h3>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {coupons.map((c) => (
-                  <div
-                    key={c.code}
-                    className="bg-stone-950 border border-amber-500/30 rounded-xl p-3.5 space-y-2 relative"
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="font-black text-amber-300 font-mono text-sm tracking-wider">
-                        {c.code}
-                      </span>
-                      <span className="bg-emerald-500/20 text-emerald-400 text-[9px] font-bold px-1.5 py-0.2 rounded">
-                        ACTIVE
-                      </span>
-                    </div>
-                    <p className="text-xs text-stone-300">{c.description}</p>
-                    <div className="text-[10px] text-stone-400 flex justify-between pt-1 border-t border-stone-800">
-                      <span>Rate: {c.bonusPercent}%</span>
-                      <span>Max: ₹{c.maxBonus}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* TAB 6: BROADCAST & ANNOUNCEMENTS */}
-        {activeTab === 'BROADCAST' && (
-          <div className="bg-stone-900 border border-stone-800 rounded-2xl p-5 shadow-sm max-w-xl mx-auto space-y-4">
-            <h2 className="text-base font-extrabold text-white flex items-center gap-2 pb-2 border-b border-stone-800">
-              <Bell className="w-5 h-5 text-amber-400" />
-              <span>Send Live Push Broadcast to All Players</span>
-            </h2>
-
-            <p className="text-xs text-stone-400">
-              This message will immediately appear as an animated banner at the top of every active player's screen.
-            </p>
-
-            <div className="space-y-3">
-              <textarea
-                rows={3}
-                value={broadcastText}
-                onChange={(e) => setBroadcastText(e.target.value)}
-                placeholder="e.g. ⚡ Mega Festival Tournament starts at 7 PM! ₹10 Lakhs guaranteed cash prize."
-                className="w-full bg-stone-950 border border-stone-800 rounded-xl p-3 text-xs text-white focus:outline-hidden"
-              />
-
-              <button
-                onClick={() => {
-                  if (!broadcastText.trim()) return alert('Enter a message to broadcast');
-                  adminSendBroadcast(broadcastText);
-                  setBroadcastText('');
-                  alert('Broadcast sent! Check the player app header.');
-                }}
-                className="w-full py-3 bg-red-700 hover:bg-red-600 text-white font-black text-xs rounded-xl shadow-md uppercase tracking-wider transition-colors"
-              >
-                BROADCAST TO ALL PLAYERS
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* TAB 7: FINANCIAL LEDGER */}
-        {activeTab === 'LEDGER' && (
-          <div className="bg-stone-900 border border-stone-800 rounded-2xl p-5 shadow-sm space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-stone-800">
-              <h2 className="text-base font-extrabold text-white">Financial Audit Ledger</h2>
-              <span className="text-xs text-stone-400">{transactions.length} Total Logged Entries</span>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead>
-                  <tr className="border-b border-stone-800 text-stone-400 uppercase text-[10px] tracking-wider">
-                    <th className="py-2.5 px-3">Tx ID</th>
-                    <th className="py-2.5 px-3">Type</th>
-                    <th className="py-2.5 px-3">Description</th>
-                    <th className="py-2.5 px-3">Amount</th>
-                    <th className="py-2.5 px-3">Balance After</th>
-                    <th className="py-2.5 px-3">Timestamp</th>
-                    <th className="py-2.5 px-3">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-stone-800/60 font-medium">
-                  {transactions.map((tx) => (
-                    <tr key={tx.id} className="hover:bg-stone-800/40 transition-colors">
-                      <td className="py-2.5 px-3 font-mono text-stone-400 text-[11px]">{tx.id}</td>
-                      <td className="py-2.5 px-3">
-                        <span
-                          className={`text-[9px] font-black px-1.5 py-0.5 rounded ${
-                            tx.type === 'DEPOSIT'
-                              ? 'bg-emerald-500/20 text-emerald-400'
-                              : tx.type === 'WITHDRAWAL'
-                              ? 'bg-amber-500/20 text-amber-300'
-                              : tx.type === 'GAME_WIN'
-                              ? 'bg-purple-500/20 text-purple-300'
-                              : 'bg-blue-500/20 text-blue-300'
-                          }`}
-                        >
-                          {tx.type}
-                        </span>
-                      </td>
-                      <td className="py-2.5 px-3 text-stone-200">{tx.description}</td>
-                      <td className="py-2.5 px-3 font-bold text-white">₹{tx.amount}</td>
-                      <td className="py-2.5 px-3 font-mono text-stone-400">₹{tx.balanceAfter.toFixed(2)}</td>
-                      <td className="py-2.5 px-3 text-[11px] text-stone-500">{tx.timestamp}</td>
-                      <td className="py-2.5 px-3">
-                        <span
-                          className={`text-[9px] font-bold px-1.5 py-0.2 rounded ${
-                            tx.status === 'SUCCESS' ? 'text-emerald-400' : 'text-amber-400'
-                          }`}
-                        >
-                          {tx.status}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
             </div>
           </div>
         )}

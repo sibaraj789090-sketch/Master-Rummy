@@ -38,6 +38,7 @@ interface DrawerMenuProps {
   onOpenInstall?: () => void;
   onOpenLoadingScreen?: () => void;
   onOpenSupabaseSetup?: () => void;
+  onOpenDocumentsVerification?: () => void;
 }
 
 export const DrawerMenu: React.FC<DrawerMenuProps> = ({
@@ -52,6 +53,7 @@ export const DrawerMenu: React.FC<DrawerMenuProps> = ({
   onOpenInstall,
   onOpenLoadingScreen,
   onOpenSupabaseSetup,
+  onOpenDocumentsVerification,
 }) => {
   const { currentUser, setActiveScreen, soundEnabled, setSoundEnabled, isAdmin, checkAdminPermissions } = useRummy();
 
@@ -107,8 +109,23 @@ export const DrawerMenu: React.FC<DrawerMenuProps> = ({
                 referrerPolicy="no-referrer"
               />
             </div>
-            <div>
-              <h3 className="font-extrabold text-sm text-white tracking-wide">{currentUser.username}</h3>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-1.5">
+                <h3 className="font-extrabold text-sm text-white tracking-wide truncate">{currentUser.username}</h3>
+                <span className="bg-red-700 text-white font-black text-[9px] px-1 py-0.2 rounded-sm shrink-0">
+                  18+
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5 mt-0.5">
+                {currentUser.whatsappNumber && (
+                  <span className="text-[10px] text-emerald-400 font-bold flex items-center gap-0.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> WhatsApp
+                  </span>
+                )}
+                <span className="text-[10px] text-stone-300">
+                  {currentUser.isKycVerified ? 'KYC Verified' : 'KYC Pending'}
+                </span>
+              </div>
               <div className="flex items-center gap-2 mt-1">
                 <div className="flex items-center gap-1 bg-black/40 px-2 py-0.5 rounded-full border border-amber-400/30 text-xs">
                   <span className="w-3.5 h-3.5 rounded-full bg-amber-400 text-amber-950 font-bold flex items-center justify-center text-[10px]">
@@ -221,6 +238,33 @@ export const DrawerMenu: React.FC<DrawerMenuProps> = ({
                   </div>
                   <ChevronRight className="w-4 h-4 text-stone-500" />
                 </button>
+
+                {/* 18+ Documents & KYC Verification Option */}
+                {onOpenDocumentsVerification && (
+                  <button
+                    onClick={() => {
+                      sounds.playCardClick();
+                      onClose();
+                      onOpenDocumentsVerification();
+                    }}
+                    className="w-full py-2 flex items-center justify-between text-stone-200 hover:text-white bg-amber-500/10 px-2 rounded-lg border border-amber-500/30 my-1"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="bg-red-700 text-white font-black text-[9px] px-1 py-0.2 rounded">18+</span>
+                      <ShieldCheck className="w-4 h-4 text-amber-400" />
+                      <span className="font-bold text-amber-300 text-xs">KYC Documents (Aadhaar/PAN)</span>
+                    </div>
+                    <span className={`text-[10px] font-black px-1.5 py-0.2 rounded ${
+                      currentUser.isKycVerified || currentUser.kycDetails?.overallStatus === 'VERIFIED'
+                        ? 'bg-emerald-950 text-emerald-400 border border-emerald-500/40'
+                        : 'bg-amber-950 text-amber-400 border border-amber-500/40'
+                    }`}>
+                      {currentUser.isKycVerified || currentUser.kycDetails?.overallStatus === 'VERIFIED'
+                        ? 'VERIFIED'
+                        : 'PENDING'}
+                    </span>
+                  </button>
+                )}
               </div>
             )}
           </div>
