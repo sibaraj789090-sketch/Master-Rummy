@@ -1,0 +1,6 @@
+{
+  "name": "Master Rummy Online & Admin Suite",
+  "description": "Complete Indian Rummy gaming platform featuring Cash, Pool, Deals, Tournaments, Challenger Leaderboards, Refer & Earn, Wallet with Add Cash & Withdrawals, and a real-time Admin Operations Panel.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
