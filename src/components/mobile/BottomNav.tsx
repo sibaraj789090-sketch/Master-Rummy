@@ -1,6 +1,6 @@
 import React from 'react';
 import { useRummy } from '../../context/RummyContext';
-import { Award, IndianRupee, Menu, Users, Spade } from 'lucide-react';
+import { Trophy, IndianRupee, Menu, Users, Spade } from 'lucide-react';
 import { sounds } from '../../utils/sound';
 
 interface BottomNavProps {
@@ -9,6 +9,8 @@ interface BottomNavProps {
 
 export const BottomNav: React.FC<BottomNavProps> = ({ onOpenMenu }) => {
   const { activeScreen, setActiveScreen } = useRummy();
+
+  const isTournamentsActive = activeScreen === 'TOURNAMENTS' || activeScreen === 'CHALLENGER';
 
   return (
     <div className="bg-[#121212] border-t border-stone-800 text-stone-400 pt-1.5 pb-[max(env(safe-area-inset-bottom,0px),0.5rem)] px-2 flex items-center justify-around z-30 select-none shadow-2xl">
@@ -30,18 +32,18 @@ export const BottomNav: React.FC<BottomNavProps> = ({ onOpenMenu }) => {
         <span className="text-[10px] tracking-tight">Add Cash</span>
       </button>
 
-      {/* 2. Challenger */}
+      {/* 2. Tournaments */}
       <button
         onClick={() => {
           sounds.playCardClick();
-          setActiveScreen('CHALLENGER');
+          setActiveScreen('TOURNAMENTS');
         }}
         className={`flex flex-col items-center gap-0.5 py-1 px-2 transition-colors ${
-          activeScreen === 'CHALLENGER' ? 'text-red-500 font-bold' : 'hover:text-stone-200'
+          isTournamentsActive ? 'text-amber-400 font-bold' : 'hover:text-stone-200'
         }`}
       >
-        <Award className="w-5 h-5" />
-        <span className="text-[10px] tracking-tight">Challenger</span>
+        <Trophy className="w-5 h-5" />
+        <span className="text-[10px] tracking-tight">Tournaments</span>
       </button>
 
       {/* 3. Lobby (Primary) */}

@@ -21,6 +21,7 @@ import {
   Shield,
   Lock,
   KeyRound,
+  Trophy,
 } from 'lucide-react';
 import { sounds } from '../../utils/sound';
 import { verifyAdminCredentials } from '../../lib/supabase';
@@ -153,7 +154,7 @@ export const DrawerMenu: React.FC<DrawerMenuProps> = ({
                 </div>
               </div>
               <span className="bg-stone-950 text-amber-400 text-[10px] px-2 py-0.5 rounded-full font-black">
-                FREE
+                APK
               </span>
             </button>
           </div>
@@ -333,13 +334,13 @@ export const DrawerMenu: React.FC<DrawerMenuProps> = ({
                   onClick={() => {
                     sounds.playCardClick();
                     onClose();
-                    setActiveScreen('CHALLENGER');
+                    setActiveScreen('TOURNAMENTS');
                   }}
                   className="w-full py-1.5 flex items-center justify-between hover:text-white"
                 >
                   <div className="flex items-center gap-2">
-                    <Compass className="w-4 h-4 text-red-400" />
-                    <span>₹2.2 Crore Challenger</span>
+                    <Trophy className="w-4 h-4 text-amber-400" />
+                    <span>Real Cash Tournaments</span>
                   </div>
                   <ChevronRight className="w-4 h-4 text-stone-500" />
                 </button>

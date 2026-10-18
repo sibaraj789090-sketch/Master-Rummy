@@ -15,10 +15,13 @@ import {
   calculatePointsSettlement,
   resolvePoolRound,
   resolveDealsRound,
+  moveCardBetweenGroups,
+  moveMultipleCardsBetweenGroups,
   GameModeConfig,
   RANKS,
 } from '../../utils/rummyRules';
 import { sounds } from '../../utils/sound';
+import { triggerWinConfetti, triggerRoundWinConfetti } from '../../utils/confetti';
 import {
   Menu,
   FileText,
@@ -40,6 +43,7 @@ import {
   ShieldAlert,
   ArrowRight,
   Sparkles,
+  Undo2,
 } from 'lucide-react';
 import { multiplayerService } from '../../services/multiplayerService';
 import { ScreenOrientation } from '@capacitor/screen-orientation';
@@ -246,6 +250,29 @@ export const RummyTable: React.FC = () => {
   // 13 Cards in Meld Groups
   const [cardGroups, setCardGroups] = useState<PlayingCard[][]>([]);
   const [selectedCards, setSelectedCards] = useState<{ cardId: string; groupIdx: number }[]>([]);
+
+  // Move History Stack for Undo capability
+  const [moveHistory, setMoveHistory] = useState<PlayingCard[][][]>([]);
+
+  // Drag-and-drop state (Touch for mobile / Android, HTML5 for desktop)
+  const [touchDrag, setTouchDrag] = useState<{
+    card: PlayingCard;
+    fromGroupIdx: number;
+    fromCardIdx: number;
+    startX: number;
+    startY: number;
+    currentX: number;
+    currentY: number;
+    isDragging: boolean;
+    hoverGroupIdx: number | null;
+  } | null>(null);
+
+  const [html5DragCard, setHtml5DragCard] = useState<{
+    card: PlayingCard;
+    fromGroupIdx: number;
+    fromCardIdx: number;
+  } | null>(null);
+  const [html5HoverGroupIdx, setHtml5HoverGroupIdx] = useState<number | null>(null);
 
   // Turn management: 0 = User (ME), 1..N = opponent seats
   const [currentTurnSeat, setCurrentTurnSeat] = useState<number>(
@@ -458,6 +485,19 @@ export const RummyTable: React.FC = () => {
     return () => clearInterval(countTimer);
   }, [playersMode]);
 
+  // Celebratory confetti animation on game or round victory
+  useEffect(() => {
+    if (winModalData?.isPlayer) {
+      triggerWinConfetti();
+    }
+  }, [winModalData]);
+
+  useEffect(() => {
+    if (roundCompleteModalData?.isPlayerWinner) {
+      triggerRoundWinConfetti();
+    }
+  }, [roundCompleteModalData]);
+
   // Turn Timer Loop (30s countdown)
   useEffect(() => {
     if (!gameStarted || playerDropped || winModalData || roundCompleteModalData) return;
@@ -630,7 +670,7 @@ export const RummyTable: React.FC = () => {
     setHasDrawnCard(true);
   };
 
-  // Toggle selection of a card
+  // Toggle selection of a card (tap to select or tap to deselect)
   const handleCardClick = (cardId: string, groupIdx: number) => {
     sounds.playCardClick();
     setSelectedCards((prev) => {
@@ -641,6 +681,162 @@ export const RummyTable: React.FC = () => {
         return [...prev, { cardId, groupIdx }];
       }
     });
+  };
+
+  // Move a single card between groups
+  const executeCardMove = (
+    cardId: string,
+    fromGroupIdx: number,
+    toGroupIdx: number,
+    insertIndex?: number
+  ) => {
+    if (fromGroupIdx === toGroupIdx && insertIndex === undefined) {
+      return false;
+    }
+
+    const res = moveCardBetweenGroups(cardGroups, cardId, fromGroupIdx, toGroupIdx, insertIndex);
+    if (res.success) {
+      sounds.playCardClick();
+      setMoveHistory((prev) => [...prev.slice(-9), cardGroups]);
+      setCardGroups(res.newGroups);
+      setSelectedCards([]);
+      return true;
+    }
+    return false;
+  };
+
+  // Move all currently selected cards to destination group (or new group if toGroupIdx is -1)
+  const executeSelectedCardsMove = (toGroupIdx: number) => {
+    if (selectedCards.length === 0) return false;
+    const cardIds = selectedCards.map((sc) => sc.cardId);
+    const res = moveMultipleCardsBetweenGroups(cardGroups, cardIds, toGroupIdx);
+    if (res.success) {
+      sounds.playCardDeal();
+      setMoveHistory((prev) => [...prev.slice(-9), cardGroups]);
+      setCardGroups(res.newGroups);
+      setSelectedCards([]);
+      return true;
+    }
+    return false;
+  };
+
+  // Undo last card movement / rearrangement
+  const handleUndoMove = () => {
+    if (moveHistory.length === 0) return;
+    sounds.playCardClick();
+    const previous = moveHistory[moveHistory.length - 1];
+    setMoveHistory((prev) => prev.slice(0, prev.length - 1));
+    setCardGroups(previous);
+    setSelectedCards([]);
+  };
+
+  // Deselect all selected cards
+  const handleDeselectAll = () => {
+    sounds.playCardClick();
+    setSelectedCards([]);
+  };
+
+  // Touch drag handlers for mobile touchscreens
+  const handleCardTouchStart = (
+    e: React.TouchEvent,
+    card: PlayingCard,
+    groupIdx: number,
+    cardIdx: number
+  ) => {
+    if (e.touches.length !== 1) return;
+    const touch = e.touches[0];
+    setTouchDrag({
+      card,
+      fromGroupIdx: groupIdx,
+      fromCardIdx: cardIdx,
+      startX: touch.clientX,
+      startY: touch.clientY,
+      currentX: touch.clientX,
+      currentY: touch.clientY,
+      isDragging: false,
+      hoverGroupIdx: null,
+    });
+  };
+
+  const handleCardTouchMove = (e: React.TouchEvent) => {
+    if (!touchDrag) return;
+    const touch = e.touches[0];
+    const dx = touch.clientX - touchDrag.startX;
+    const dy = touch.clientY - touchDrag.startY;
+    const dist = Math.hypot(dx, dy);
+
+    const isDragging = dist > 8 || touchDrag.isDragging;
+
+    // Detect group under touch point
+    let hoverGroupIdx: number | null = null;
+    const el = document.elementFromPoint(touch.clientX, touch.clientY);
+    if (el) {
+      const groupEl = el.closest('[data-meld-group]');
+      if (groupEl) {
+        const val = groupEl.getAttribute('data-meld-group');
+        if (val === 'new') {
+          hoverGroupIdx = -1;
+        } else if (val !== null) {
+          hoverGroupIdx = parseInt(val, 10);
+        }
+      }
+    }
+
+    setTouchDrag((prev) =>
+      prev
+        ? {
+            ...prev,
+            currentX: touch.clientX,
+            currentY: touch.clientY,
+            isDragging,
+            hoverGroupIdx,
+          }
+        : null
+    );
+  };
+
+  const handleCardTouchEnd = () => {
+    if (!touchDrag) return;
+    if (touchDrag.isDragging && touchDrag.hoverGroupIdx !== null) {
+      executeCardMove(
+        touchDrag.card.id,
+        touchDrag.fromGroupIdx,
+        touchDrag.hoverGroupIdx
+      );
+    }
+    setTouchDrag(null);
+  };
+
+  const handleCardTouchCancel = () => {
+    setTouchDrag(null);
+  };
+
+  // HTML5 drag handlers for desktop mouse
+  const handleHtml5DragStart = (
+    e: React.DragEvent,
+    card: PlayingCard,
+    groupIdx: number,
+    cardIdx: number
+  ) => {
+    e.dataTransfer.setData('text/plain', card.id);
+    e.dataTransfer.effectAllowed = 'move';
+    setHtml5DragCard({ card, fromGroupIdx: groupIdx, fromCardIdx: cardIdx });
+  };
+
+  const handleHtml5DragOverGroup = (e: React.DragEvent, targetGroupIdx: number) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (html5HoverGroupIdx !== targetGroupIdx) {
+      setHtml5HoverGroupIdx(targetGroupIdx);
+    }
+  };
+
+  const handleHtml5DropGroup = (e: React.DragEvent, targetGroupIdx: number) => {
+    e.preventDefault();
+    setHtml5HoverGroupIdx(null);
+    if (!html5DragCard) return;
+    executeCardMove(html5DragCard.card.id, html5DragCard.fromGroupIdx, targetGroupIdx);
+    setHtml5DragCard(null);
   };
 
   // Discard selected card
@@ -688,6 +884,7 @@ export const RummyTable: React.FC = () => {
     }
 
     sounds.playCardDeal();
+    setMoveHistory((prev) => [...prev.slice(-9), cardGroups]);
     const selectedIds = new Set(selectedCards.map((sc) => sc.cardId));
     const groupedCards: PlayingCard[] = [];
 
@@ -715,6 +912,7 @@ export const RummyTable: React.FC = () => {
     sounds.playCardClick();
     const allCards = cardGroups.flat();
     if (allCards.length === 0) return;
+    setMoveHistory((prev) => [...prev.slice(-9), cardGroups]);
     const sortedGroups = autoSortHand(allCards, wildJokerRank);
     setCardGroups(sortedGroups);
     setSelectedCards([]);
@@ -797,6 +995,9 @@ export const RummyTable: React.FC = () => {
   // Conclude Round or Deal (Common handler for declaration or all-fold)
   const handleConcludeRoundOrDeal = (winnerId: string, isUserWinner: boolean) => {
     sounds.playWinFanfare();
+    if (isUserWinner) {
+      triggerWinConfetti();
+    }
 
     // 1. Calculate round scores for all participants
     const userPenalty = isUserWinner
@@ -1636,21 +1837,61 @@ export const RummyTable: React.FC = () => {
             </div>
           </div>
 
-          {/* 4. PLAYER HAND: 13 Large Cards in Meld Groups */}
-          <div className="w-full flex justify-center z-20 px-1 sm:px-2 pb-1 shrink-0">
+          {/* 4. PLAYER HAND: 13 Large Cards in Meld Groups with Drag-and-Drop & Tap-to-Move */}
+          <div
+            className="w-full flex justify-center z-20 px-1 sm:px-2 pb-1 shrink-0"
+            onTouchMove={handleCardTouchMove}
+            onTouchEnd={handleCardTouchEnd}
+            onTouchCancel={handleCardTouchCancel}
+          >
             <div className="flex items-end justify-center gap-1.5 sm:gap-2.5 md:gap-3.5 max-w-full overflow-x-auto no-scrollbar py-1 px-1">
               {cardGroups.map((group, groupIdx) => {
                 const groupStatus = getGroupStatus(group);
+                const isHovered =
+                  (touchDrag?.isDragging && touchDrag.hoverGroupIdx === groupIdx) ||
+                  html5HoverGroupIdx === groupIdx;
+                const isAnyCardSelected = selectedCards.length > 0;
+                const canMoveSelectedHere =
+                  isAnyCardSelected &&
+                  !selectedCards.every((sc) => sc.groupIdx === groupIdx);
 
                 return (
                   <div
                     key={groupIdx}
-                    className={`flex flex-col items-center rounded-2xl p-1 sm:p-1.5 transition-all select-none shrink-0 ${
-                      groupStatus.isValid
+                    data-meld-group={groupIdx}
+                    onDragOver={(e) => handleHtml5DragOverGroup(e, groupIdx)}
+                    onDragLeave={() => setHtml5HoverGroupIdx(null)}
+                    onDrop={(e) => handleHtml5DropGroup(e, groupIdx)}
+                    onClick={(e) => {
+                      if (canMoveSelectedHere) {
+                        e.stopPropagation();
+                        executeSelectedCardsMove(groupIdx);
+                      }
+                    }}
+                    className={`flex flex-col items-center rounded-2xl p-1 sm:p-1.5 transition-all select-none shrink-0 relative ${
+                      isHovered
+                        ? 'bg-amber-900/40 ring-2 ring-amber-400 scale-[1.02] shadow-[0_0_15px_rgba(251,191,36,0.6)]'
+                        : canMoveSelectedHere
+                        ? 'bg-black/35 ring-1 ring-emerald-400/70 hover:bg-emerald-950/30 cursor-pointer shadow-md'
+                        : groupStatus.isValid
                         ? 'bg-black/25 border border-emerald-400/30 shadow-md'
                         : 'bg-black/30 border border-dashed border-red-500/40 shadow-sm'
                     }`}
                   >
+                    {/* Tap-to-move quick action button when card(s) from other group are selected */}
+                    {canMoveSelectedHere && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          executeSelectedCardsMove(groupIdx);
+                        }}
+                        className="mb-1 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-[9px] sm:text-[10px] px-2.5 py-0.5 rounded-full shadow-lg border border-white animate-pulse flex items-center gap-1 z-30"
+                      >
+                        <span>↓ Move Here</span>
+                      </button>
+                    )}
+
                     {/* Cards in this meld group with readable overlap */}
                     <div className="flex -space-x-7 sm:-space-x-9 md:-space-x-11 lg:-space-x-12">
                       {group.map((card, cardIdx) => {
@@ -1667,17 +1908,34 @@ export const RummyTable: React.FC = () => {
                             : 'text-slate-900';
                         const suitSymbol = getSuitSymbol(card.suit);
 
-                        // Printed Joker with Jester Clown Art
+                        const cardClassName = `w-[52px] sm:w-[62px] md:w-[72px] lg:w-[82px] h-[78px] sm:h-[94px] md:h-[108px] lg:h-[122px] shrink-0 rounded-lg sm:rounded-xl cursor-grab active:cursor-grabbing transition-all duration-150 flex select-none relative ${
+                          isSelected
+                            ? 'transform -translate-y-4 sm:-translate-y-5 ring-3 ring-amber-400 shadow-2xl z-30'
+                            : 'hover:-translate-y-1.5 z-10'
+                        } ${
+                          isPrintedJoker
+                            ? 'bg-[#fef9c3] border-2 border-amber-400 justify-between p-1 sm:p-1.5 shadow-lg'
+                            : `bg-white border border-slate-300 flex-col justify-between p-1 sm:p-1.5 shadow-lg ${
+                                isWild ? 'ring-2 ring-amber-400/90 bg-amber-50/95' : ''
+                              }`
+                        }`;
+
                         if (isPrintedJoker) {
                           return (
                             <div
                               key={card.id}
-                              onClick={() => handleCardClick(card.id, groupIdx)}
-                              className={`w-[52px] sm:w-[62px] md:w-[72px] lg:w-[82px] h-[78px] sm:h-[94px] md:h-[108px] lg:h-[122px] shrink-0 rounded-lg sm:rounded-xl bg-[#fef9c3] border-2 border-amber-400 cursor-pointer transition-all duration-150 flex justify-between p-1 sm:p-1.5 shadow-lg select-none relative ${
-                                isSelected
-                                  ? 'transform -translate-y-4 sm:-translate-y-5 ring-3 ring-amber-400 shadow-2xl z-30'
-                                  : 'hover:-translate-y-1.5 z-10'
-                              }`}
+                              draggable
+                              onDragStart={(e) => handleHtml5DragStart(e, card, groupIdx, cardIdx)}
+                              onDragEnd={() => {
+                                setHtml5DragCard(null);
+                                setHtml5HoverGroupIdx(null);
+                              }}
+                              onTouchStart={(e) => handleCardTouchStart(e, card, groupIdx, cardIdx)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleCardClick(card.id, groupIdx);
+                              }}
+                              className={cardClassName}
                             >
                               <div className="flex flex-col justify-around items-center text-red-600 font-black text-[9px] sm:text-[11px] md:text-xs leading-none">
                                 <span>J</span>
@@ -1693,20 +1951,21 @@ export const RummyTable: React.FC = () => {
                           );
                         }
 
-                        // Standard or Wild Joker Card
                         return (
                           <div
                             key={card.id}
-                            onClick={() => handleCardClick(card.id, groupIdx)}
-                            className={`w-[52px] sm:w-[62px] md:w-[72px] lg:w-[82px] h-[78px] sm:h-[94px] md:h-[108px] lg:h-[122px] shrink-0 rounded-lg sm:rounded-xl bg-white border border-slate-300 cursor-pointer transition-all duration-150 flex flex-col justify-between p-1 sm:p-1.5 shadow-lg select-none relative ${
-                              isSelected
-                                ? 'transform -translate-y-4 sm:-translate-y-5 ring-3 ring-amber-400 shadow-2xl z-30'
-                                : 'hover:-translate-y-1.5 z-10'
-                            } ${
-                              isWild
-                                ? 'ring-2 ring-amber-400/90 bg-amber-50/95'
-                                : ''
-                            }`}
+                            draggable
+                            onDragStart={(e) => handleHtml5DragStart(e, card, groupIdx, cardIdx)}
+                            onDragEnd={() => {
+                              setHtml5DragCard(null);
+                              setHtml5HoverGroupIdx(null);
+                            }}
+                            onTouchStart={(e) => handleCardTouchStart(e, card, groupIdx, cardIdx)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleCardClick(card.id, groupIdx);
+                            }}
+                            className={cardClassName}
                           >
                             {/* Top Left: Rank and Suit */}
                             <div className="flex flex-col items-start leading-none">
@@ -1774,6 +2033,27 @@ export const RummyTable: React.FC = () => {
                   </div>
                 );
               })}
+
+              {/* + New Group Drop Slot (visible when dragging or when cards are selected) */}
+              {(selectedCards.length > 0 || touchDrag?.isDragging || html5DragCard) && (
+                <div
+                  data-meld-group="new"
+                  onDragOver={(e) => handleHtml5DragOverGroup(e, -1)}
+                  onDragLeave={() => setHtml5HoverGroupIdx(null)}
+                  onDrop={(e) => handleHtml5DropGroup(e, -1)}
+                  onClick={() => executeSelectedCardsMove(-1)}
+                  className={`w-14 sm:w-16 h-20 sm:h-24 rounded-2xl border-2 border-dashed flex flex-col items-center justify-center text-center p-1 transition-all cursor-pointer select-none shrink-0 ${
+                    touchDrag?.hoverGroupIdx === -1 || html5HoverGroupIdx === -1
+                      ? 'border-amber-400 bg-amber-500/20 text-amber-300 ring-2 ring-amber-400 scale-105'
+                      : 'border-stone-500/60 bg-black/20 text-stone-400 hover:border-amber-400 hover:text-amber-300'
+                  }`}
+                >
+                  <span className="text-base sm:text-lg font-black leading-none">+</span>
+                  <span className="text-[8px] sm:text-[9px] font-black uppercase tracking-wider mt-0.5">
+                    New Group
+                  </span>
+                </div>
+              )}
             </div>
           </div>
 
@@ -1886,8 +2166,31 @@ export const RummyTable: React.FC = () => {
               </div>
             </div>
 
-            {/* Right: Action Buttons (GROUP / DISCARD / DROP / AUTO SORT) */}
-            <div className="flex items-center gap-2">
+            {/* Right: Action Buttons (UNDO / DESELECT / GROUP / DISCARD / DROP / AUTO SORT) */}
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              {/* Undo Move Button */}
+              {moveHistory.length > 0 && (
+                <button
+                  onClick={handleUndoMove}
+                  title="Undo last card move"
+                  className="bg-stone-800 hover:bg-stone-700 text-amber-300 font-black text-xs sm:text-sm px-2.5 sm:px-3 py-2 rounded-xl shadow-md border border-stone-600 flex items-center gap-1 active:scale-95 transition-all"
+                >
+                  <Undo2 className="w-3.5 h-3.5 text-amber-400" />
+                  <span className="hidden sm:inline">UNDO</span>
+                </button>
+              )}
+
+              {/* Deselect Button */}
+              {selectedCards.length > 0 && (
+                <button
+                  onClick={handleDeselectAll}
+                  title="Deselect all cards"
+                  className="bg-stone-800 hover:bg-stone-700 text-stone-300 font-bold text-xs sm:text-sm px-2.5 py-2 rounded-xl shadow-md border border-stone-600 active:scale-95 transition-all"
+                >
+                  ✕
+                </button>
+              )}
+
               {/* GROUP Button */}
               {selectedCards.length >= 2 && (
                 <button
@@ -2121,9 +2424,14 @@ export const RummyTable: React.FC = () => {
         {winModalData && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-fade-in">
             <div className="bg-gradient-to-b from-[#6b0b14] via-[#850d18] to-[#45050b] text-white rounded-3xl max-w-sm w-full p-6 text-center border-2 border-amber-300 shadow-2xl space-y-4">
-              <div className="w-16 h-16 mx-auto rounded-full bg-amber-400 text-amber-950 flex items-center justify-center text-3xl shadow-xl animate-bounce">
+              <button
+                type="button"
+                onClick={() => triggerWinConfetti()}
+                title="Celebrate!"
+                className="w-16 h-16 mx-auto rounded-full bg-amber-400 hover:bg-amber-300 text-amber-950 flex items-center justify-center text-3xl shadow-xl animate-bounce cursor-pointer active:scale-95 transition-transform ring-4 ring-amber-300/50"
+              >
                 🏆
-              </div>
+              </button>
 
               <div>
                 <span className="text-[11px] font-extrabold uppercase tracking-widest text-amber-300">
@@ -2450,6 +2758,56 @@ export const RummyTable: React.FC = () => {
             </div>
           </div>
         )}
+
+      {/* Floating Card Ghost for Mobile Touch Drag */}
+      {touchDrag?.isDragging && touchDrag.card && (
+        <div
+          style={{
+            position: 'fixed',
+            left: touchDrag.currentX,
+            top: touchDrag.currentY,
+            transform: 'translate(-50%, -60%) rotate(4deg)',
+            pointerEvents: 'none',
+            zIndex: 9999,
+          }}
+          className="w-[56px] sm:w-[66px] h-[82px] sm:h-[98px] rounded-lg sm:rounded-xl bg-white border-2 border-amber-400 shadow-2xl p-1 sm:p-1.5 flex flex-col justify-between opacity-95 animate-pulse"
+        >
+          <div className="flex flex-col items-start leading-none">
+            <span
+              className={`text-base font-black ${
+                touchDrag.card.suit === 'hearts' || touchDrag.card.suit === 'diamonds'
+                  ? 'text-red-600'
+                  : 'text-slate-900'
+              }`}
+            >
+              {touchDrag.card.rank}
+            </span>
+            <span
+              className={`text-xs font-black ${
+                touchDrag.card.suit === 'hearts' || touchDrag.card.suit === 'diamonds'
+                  ? 'text-red-600'
+                  : 'text-slate-900'
+              } -mt-0.5`}
+            >
+              {getSuitSymbol(touchDrag.card.suit)}
+            </span>
+          </div>
+          <div className="text-center font-black text-xl leading-none">
+            <span
+              className={
+                touchDrag.card.suit === 'hearts' || touchDrag.card.suit === 'diamonds'
+                  ? 'text-red-600'
+                  : 'text-slate-900'
+              }
+            >
+              {getSuitSymbol(touchDrag.card.suit)}
+            </span>
+          </div>
+          <div className="text-right text-[8px] font-mono text-slate-400">
+            {touchDrag.card.points}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

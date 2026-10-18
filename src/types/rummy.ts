@@ -10,7 +10,7 @@ export interface PlayingCard {
   isJoker?: boolean;
 }
 
-export type GameCategory = 'CASH' | 'TOURNAMENTS' | 'PRACTICE';
+export type GameCategory = 'CASH' | 'TOURNAMENTS';
 export type CashGameVariant = 'Points' | 'Pool' | 'Deals';
 export type PlayersCount = 2 | 6;
 

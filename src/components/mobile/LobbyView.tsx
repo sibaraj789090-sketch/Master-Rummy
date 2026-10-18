@@ -51,10 +51,10 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
   const [copiedCode, setCopiedCode] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
 
-  // Primary tab: CASH | TOURNAMENTS | PRACTICE
+  // Primary tab: Real Money Only (CASH | TOURNAMENTS)
   const [category, setCategory] = useState<GameCategory>('CASH');
 
-  // Sub-tabs under CASH / PRACTICE
+  // Sub-tabs under CASH GAMES
   const [variant, setVariant] = useState<CashGameVariant>('Points');
   const [playersCount, setPlayersCount] = useState<PlayersCount>(6);
 
@@ -75,9 +75,6 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
   // For Deals: Entry fees [1, 2, 5, 10, 25, 50, 100, 200, 500, 1000, 2000]
   const dealSteps = [1, 2, 5, 10, 25, 50, 100, 200, 500, 1000, 2000];
   const [dealIndex, setDealIndex] = useState(1); // default ₹2
-
-  // Practice sliders
-  const [practicePointIndex, setPracticePointIndex] = useState(2); // 50 pts
 
   // Promo Gift Modal
   const [showGiftModal, setShowGiftModal] = useState(false);
@@ -265,9 +262,9 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
         </div>
       </div>
 
-      {/* 2. Three Main Category Tabs: CASH | TOURNAMENTS | PRACTICE (From Screenshots 1, 6, 7, 8) */}
-      <div className="bg-white grid grid-cols-3 border-b border-slate-200 shadow-xs">
-        {/* CASH Tab */}
+      {/* 2. Real Money Category Tabs: CASH GAMES | CASH TOURNAMENTS */}
+      <div className="bg-white grid grid-cols-2 border-b border-slate-200 shadow-xs">
+        {/* CASH GAMES Tab */}
         <button
           onClick={() => {
             sounds.playCardClick();
@@ -283,14 +280,14 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
             <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-0 h-0 border-x-6 border-x-transparent border-t-6 border-t-[#850d18]" />
           )}
           <Coins className={`w-5 h-5 mb-0.5 ${category === 'CASH' ? 'text-amber-300' : 'text-slate-500'}`} />
-          <span className="text-xs uppercase font-extrabold tracking-wide">CASH</span>
+          <span className="text-xs uppercase font-extrabold tracking-wide">CASH GAMES</span>
         </button>
 
         {/* TOURNAMENTS Tab */}
         <button
           onClick={() => {
             sounds.playCardClick();
-            onOpenTournaments();
+            setCategory('TOURNAMENTS');
           }}
           className={`py-3 px-2 flex flex-col items-center justify-center relative transition-all ${
             category === 'TOURNAMENTS'
@@ -302,26 +299,24 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
             <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-0 h-0 border-x-6 border-x-transparent border-t-6 border-t-[#850d18]" />
           )}
           <Trophy className={`w-5 h-5 mb-0.5 ${category === 'TOURNAMENTS' ? 'text-amber-300' : 'text-slate-500'}`} />
-          <span className="text-xs uppercase font-extrabold tracking-wide">TOURNAMENTS</span>
+          <span className="text-xs uppercase font-extrabold tracking-wide">CASH TOURNAMENTS</span>
         </button>
+      </div>
 
-        {/* PRACTICE Tab */}
+      {/* Real Cash Verification Banner */}
+      <div className="bg-gradient-to-r from-emerald-950/10 via-amber-950/10 to-transparent border-b border-emerald-500/20 px-3 py-1.5 flex items-center justify-between text-xs">
+        <div className="flex items-center gap-1.5 text-emerald-800 font-extrabold text-[11px]">
+          <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+          <span>Real Money Gaming · Instant UPI & Bank Withdrawals</span>
+        </div>
         <button
           onClick={() => {
-            sounds.playCardClick();
-            setCategory('PRACTICE');
+            sounds.playCoinSound();
+            onOpenAddCash();
           }}
-          className={`py-3 px-2 flex flex-col items-center justify-center relative transition-all ${
-            category === 'PRACTICE'
-              ? 'bg-[#850d18] text-white font-bold shadow-md'
-              : 'text-slate-600 hover:bg-slate-50'
-          }`}
+          className="text-[10px] font-black bg-gradient-to-r from-amber-500 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 text-stone-950 px-2 py-0.5 rounded-full shadow-xs active:scale-95 transition-transform"
         >
-          {category === 'PRACTICE' && (
-            <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-0 h-0 border-x-6 border-x-transparent border-t-6 border-t-[#850d18]" />
-          )}
-          <Settings className={`w-5 h-5 mb-0.5 ${category === 'PRACTICE' ? 'text-amber-300' : 'text-slate-500'}`} />
-          <span className="text-xs uppercase font-extrabold tracking-wide">PRACTICE</span>
+          + ADD CASH
         </button>
       </div>
 
@@ -330,7 +325,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
         <TournamentsView />
       ) : (
         <>
-          {/* 3. Sub-Tabs: Points | Pool | Deals (From Screenshots 1, 6, 7) */}
+          {/* 3. Sub-Tabs: Points | Pool | Deals */}
           <div className="bg-slate-100 flex items-center justify-around border-b border-slate-300/80">
             <button
               onClick={() => {
@@ -342,7 +337,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
               }`}
             >
               {variant === 'Points' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-red-700" />}
-              Points
+              Points Rummy
             </button>
             <button
               onClick={() => {
@@ -354,7 +349,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
               }`}
             >
               {variant === 'Pool' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-red-700" />}
-              Pool
+              Pool Rummy
             </button>
             <button
               onClick={() => {
@@ -366,22 +361,9 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
               }`}
             >
               {variant === 'Deals' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-red-700" />}
-              Deals
+              Deals Rummy
             </button>
           </div>
-
-          {/* 4. Practice Chips Badge if in Practice Mode */}
-          {category === 'PRACTICE' && (
-            <div className="px-4 pt-3 flex justify-center">
-              <div className="bg-amber-100 border border-amber-300 text-amber-900 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 shadow-xs">
-                <span className="w-4 h-4 rounded-full bg-red-700 text-white font-black flex items-center justify-center text-[10px]">
-                  ♣
-                </span>
-                <span>Practice Chips:</span>
-                <span className="font-extrabold tabular-nums">{currentUser.practiceChips.toLocaleString()}</span>
-              </div>
-            </div>
-          )}
 
       {/* 5. Main Game Configuration Panel */}
       <div className="p-4 flex-1 flex flex-col justify-between max-w-md mx-auto w-full">

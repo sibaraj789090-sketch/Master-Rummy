@@ -284,16 +284,22 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               </div>
             </div>
 
-            <div className="bg-stone-950/70 border border-amber-500/20 rounded-xl p-3 my-4">
-              <span className="text-[10px] text-stone-400 font-bold uppercase tracking-wider">
-                Practice Points (Non-Redeemable)
-              </span>
-              <p className="text-2xl font-black text-amber-400">
-                {Number(currentUser.practiceChips || 10000).toLocaleString()} <span className="text-xs text-stone-300 font-semibold">Chips</span>
+            <div className="bg-stone-950/70 border border-amber-500/30 rounded-xl p-3 my-4">
+              <div className="flex justify-between items-center">
+                <span className="text-[10px] text-amber-400 font-extrabold uppercase tracking-wider">
+                  Real Cash Balance
+                </span>
+                <span className="text-[9px] bg-emerald-950 text-emerald-400 px-2 py-0.5 rounded-full font-bold border border-emerald-500/40">
+                  100% Real Money
+                </span>
+              </div>
+              <p className="text-2xl font-black text-amber-300 mt-1">
+                ₹{(currentUser.depositBalance + currentUser.withdrawalBalance).toFixed(2)}
               </p>
-              <p className="text-[10px] text-emerald-400 mt-0.5">
-                Multiplayer Ready · Realtime Connected
-              </p>
+              <div className="flex justify-between items-center text-[10px] text-stone-300 mt-1.5 pt-1.5 border-t border-stone-800">
+                <span>Deposit: <strong className="text-white font-mono">₹{currentUser.depositBalance.toFixed(2)}</strong></span>
+                <span>Winnings: <strong className="text-emerald-400 font-mono">₹{currentUser.withdrawalBalance.toFixed(2)}</strong></span>
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-2">

@@ -13,6 +13,7 @@ import {
   GameSession,
 } from '../types/rummy';
 import { sounds } from '../utils/sound';
+import { triggerWinConfetti } from '../utils/confetti';
 import { getSavedAuthUser, checkIsUserAdmin } from '../lib/supabase';
 
 interface RummyContextType {
@@ -25,9 +26,9 @@ interface RummyContextType {
   coupons: Coupon[];
   adminSettings: AdminSettings;
   soundEnabled: boolean;
-  activeScreen: 'LOBBY' | 'CHALLENGER' | 'REFER_EARN' | 'WALLET' | 'WITHDRAW' | 'ADD_CASH' | 'GAME_TABLE';
+  activeScreen: 'LOBBY' | 'CHALLENGER' | 'TOURNAMENTS' | 'REFER_EARN' | 'WALLET' | 'WITHDRAW' | 'ADD_CASH' | 'GAME_TABLE';
   activeGameConfig: {
-    category: 'CASH' | 'TOURNAMENTS' | 'PRACTICE';
+    category: 'CASH' | 'TOURNAMENTS';
     variant: 'Points' | 'Pool' | 'Deals';
     playersCount: 2 | 6;
     entryFee: number;
@@ -45,7 +46,7 @@ interface RummyContextType {
   checkAdminPermissions: () => Promise<boolean>;
 
   // Actions
-  setActiveScreen: (screen: 'LOBBY' | 'CHALLENGER' | 'REFER_EARN' | 'WALLET' | 'WITHDRAW' | 'ADD_CASH' | 'GAME_TABLE') => void;
+  setActiveScreen: (screen: 'LOBBY' | 'CHALLENGER' | 'TOURNAMENTS' | 'REFER_EARN' | 'WALLET' | 'WITHDRAW' | 'ADD_CASH' | 'GAME_TABLE') => void;
   setSoundEnabled: (enabled: boolean) => void;
   dismissBroadcast: () => void;
   updateCurrentUserProfile: (updates: Partial<UserProfile>) => void;
@@ -176,73 +177,121 @@ const INITIAL_USERS: UserProfile[] = [
 const INITIAL_TOURNAMENTS: Tournament[] = [
   {
     id: 'tour_1',
-    title: 'Night Owl Freeroll Series',
-    timeDisplay: '07:00 AM, Today',
-    startTime: '2026-10-18T07:00:00Z',
-    entryFee: 0,
-    prizePool: 100.6,
-    maxParticipants: 500,
-    joinedCount: 500,
-    status: 'FULL',
-    registeredUserIds: ['1000001', '1000002'],
+    title: 'Daily Flash 50K Blast',
+    timeDisplay: 'Starting in 15 mins',
+    startTime: '2026-10-18T18:45:00Z',
+    entryFee: 50,
+    prizePool: 50000,
+    maxParticipants: 250,
+    joinedCount: 184,
+    status: 'OPEN',
+    registeredUserIds: ['1000001'],
   },
   {
     id: 'tour_2',
-    title: 'Mega Afternoon Delight',
-    timeDisplay: '08:00 AM, Today',
-    startTime: '2026-10-18T08:00:00Z',
-    entryFee: 3,
-    prizePool: 1000,
-    maxParticipants: 370,
-    joinedCount: 370,
-    status: 'FULL',
-    registeredUserIds: ['1000003'],
+    title: 'Super Sunday ₹5 Lakh Mega Series',
+    timeDisplay: '08:00 PM, Today',
+    startTime: '2026-10-18T20:00:00Z',
+    entryFee: 100,
+    prizePool: 500000,
+    maxParticipants: 1000,
+    joinedCount: 642,
+    status: 'OPEN',
+    registeredUserIds: [],
   },
   {
     id: 'tour_3',
-    title: 'Morning Boost Jackpot',
-    timeDisplay: '09:00 AM, Today',
-    startTime: '2026-10-18T09:00:00Z',
-    entryFee: 1,
-    prizePool: 500,
-    maxParticipants: 550,
-    joinedCount: 550,
-    status: 'FULL',
+    title: 'Night Owl Super Cash Series',
+    timeDisplay: '10:00 PM, Tonight',
+    startTime: '2026-10-18T22:00:00Z',
+    entryFee: 10,
+    prizePool: 15000,
+    maxParticipants: 500,
+    joinedCount: 312,
+    status: 'OPEN',
     registeredUserIds: [],
   },
   {
     id: 'tour_4',
-    title: 'Morning Boost Jackpot',
-    timeDisplay: '03:00 PM, Today',
-    startTime: '2026-10-18T15:00:00Z',
-    entryFee: 1,
-    prizePool: 500,
-    maxParticipants: 500,
-    joinedCount: 247,
+    title: 'Mega Afternoon Delight',
+    timeDisplay: '02:00 PM, Today',
+    startTime: '2026-10-18T14:00:00Z',
+    entryFee: 25,
+    prizePool: 25000,
+    maxParticipants: 400,
+    joinedCount: 280,
     status: 'OPEN',
     registeredUserIds: [],
   },
   {
     id: 'tour_5',
-    title: 'Mega Afternoon Delight',
-    timeDisplay: '04:00 PM, Today',
-    startTime: '2026-10-18T16:00:00Z',
-    entryFee: 3,
-    prizePool: 1000,
-    maxParticipants: 400,
-    joinedCount: 57,
+    title: 'High Roller Elite Championship',
+    timeDisplay: '09:00 PM, Today',
+    startTime: '2026-10-18T21:00:00Z',
+    entryFee: 500,
+    prizePool: 1000000,
+    maxParticipants: 200,
+    joinedCount: 114,
     status: 'OPEN',
     registeredUserIds: [],
   },
   {
     id: 'tour_6',
-    title: 'Morning Boost Jackpot',
-    timeDisplay: '05:00 PM, Today',
-    startTime: '2026-10-18T17:00:00Z',
-    entryFee: 1,
-    prizePool: 500,
+    title: 'Morning Boost Cash Jackpot',
+    timeDisplay: '09:30 AM, Tomorrow',
+    startTime: '2026-10-19T09:30:00Z',
+    entryFee: 5,
+    prizePool: 10000,
     maxParticipants: 500,
-    joinedCount: 0,
+    joinedCount: 215,
+    status: 'OPEN',
+    registeredUserIds: [],
+  },
+  {
+    id: 'tour_7',
+    title: 'Pro Rumble 6-Max Express',
+    timeDisplay: '06:00 PM, Today',
+    startTime: '2026-10-18T18:00:00Z',
+    entryFee: 15,
+    prizePool: 20000,
+    maxParticipants: 300,
+    joinedCount: 142,
+    status: 'OPEN',
+    registeredUserIds: [],
+  },
+  {
+    id: 'tour_8',
+    title: 'Midnight Bounty Hunter 30K',
+    timeDisplay: '11:59 PM, Tonight',
+    startTime: '2026-10-18T23:59:00Z',
+    entryFee: 20,
+    prizePool: 30000,
+    maxParticipants: 350,
+    joinedCount: 88,
+    status: 'OPEN',
+    registeredUserIds: [],
+  },
+  {
+    id: 'tour_9',
+    title: 'Speed Rummy Knockout 40K',
+    timeDisplay: 'Starting in 45 mins',
+    startTime: '2026-10-18T19:15:00Z',
+    entryFee: 35,
+    prizePool: 40000,
+    maxParticipants: 200,
+    joinedCount: 96,
+    status: 'OPEN',
+    registeredUserIds: [],
+  },
+  {
+    id: 'tour_10',
+    title: 'Grand Master Real Cash Cup',
+    timeDisplay: '07:00 PM, Today',
+    startTime: '2026-10-18T19:00:00Z',
+    entryFee: 250,
+    prizePool: 250000,
+    maxParticipants: 250,
+    joinedCount: 135,
     status: 'OPEN',
     registeredUserIds: [],
   },
@@ -389,13 +438,13 @@ export const RummyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     maxWithdrawal: 50000,
     welcomeBonus: 50,
     referralBonus: 1100,
-    bannerBroadcast: 'BUY 1 GET 3: Recharge once and get free 2-day rewards!',
+    bannerBroadcast: 'BUY 1 GET 3: Recharge once and get instant extra 2-day cash rewards!',
     soundEnabled: true,
     maintenanceMode: false,
   });
 
   const [soundEnabled, setSoundEnabledState] = useState(true);
-  const [activeScreen, setActiveScreen] = useState<'LOBBY' | 'CHALLENGER' | 'REFER_EARN' | 'WALLET' | 'WITHDRAW' | 'ADD_CASH' | 'GAME_TABLE'>('LOBBY');
+  const [activeScreen, setActiveScreen] = useState<'LOBBY' | 'CHALLENGER' | 'TOURNAMENTS' | 'REFER_EARN' | 'WALLET' | 'WITHDRAW' | 'ADD_CASH' | 'GAME_TABLE'>('LOBBY');
   const [activeGameConfig, setActiveGameConfig] = useState<RummyContextType['activeGameConfig']>(null);
   const [multiplayerRoom, setMultiplayerRoom] = useState<GameRoom | null>(null);
   const [multiplayerPlayer, setMultiplayerPlayer] = useState<RoomPlayer | null>(null);
@@ -638,58 +687,46 @@ export const RummyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return { success: true, message: `Successfully registered for ${t.title}!` };
   };
 
-  // Launch Game
+  // Launch Game (100% Real Money Cash Only)
   const launchGame = (config: NonNullable<RummyContextType['activeGameConfig']>) => {
-    if (config.category === 'CASH') {
-      let totalCash = currentUser.depositBalance + currentUser.withdrawalBalance;
-      if (totalCash < config.entryFee) {
-        // Auto demo recharge so testing is seamless
-        const needed = config.entryFee + 1000;
-        currentUser.depositBalance += needed;
-        totalCash += needed;
-      }
-
-      // Deduct entry fee
-      let remaining = config.entryFee;
-      let newDeposit = currentUser.depositBalance;
-      let newWithdrawal = currentUser.withdrawalBalance;
-
-      if (newDeposit >= remaining) {
-        newDeposit -= remaining;
-      } else {
-        remaining -= newDeposit;
-        newDeposit = 0;
-        newWithdrawal -= remaining;
-      }
-
-      setCurrentUser((prev) => ({
-        ...prev,
-        depositBalance: Number(newDeposit.toFixed(2)),
-        withdrawalBalance: Number(newWithdrawal.toFixed(2)),
-      }));
-
-      const newTx: Transaction = {
-        id: `tx_${Date.now()}_game`,
-        userId: currentUser.id,
-        type: 'GAME_ENTRY',
-        amount: config.entryFee,
-        status: 'SUCCESS',
-        description: `${config.variant} Rummy entry fee`,
-        timestamp: new Date().toLocaleString(),
-        balanceAfter: newDeposit + newWithdrawal,
-      };
-      setTransactions((prev) => [newTx, ...prev]);
-    } else if (config.category === 'PRACTICE') {
-      if (currentUser.practiceChips < config.entryFee) {
-        // Auto reload practice chips
-        setCurrentUser((prev) => ({ ...prev, practiceChips: 10000 }));
-      } else {
-        setCurrentUser((prev) => ({
-          ...prev,
-          practiceChips: prev.practiceChips - config.entryFee,
-        }));
-      }
+    let totalCash = currentUser.depositBalance + currentUser.withdrawalBalance;
+    if (totalCash < config.entryFee) {
+      // Auto demo recharge so testing is seamless
+      const needed = config.entryFee + 1000;
+      currentUser.depositBalance += needed;
+      totalCash += needed;
     }
+
+    // Deduct real cash entry fee
+    let remaining = config.entryFee;
+    let newDeposit = currentUser.depositBalance;
+    let newWithdrawal = currentUser.withdrawalBalance;
+
+    if (newDeposit >= remaining) {
+      newDeposit -= remaining;
+    } else {
+      remaining -= newDeposit;
+      newDeposit = 0;
+      newWithdrawal -= remaining;
+    }
+
+    setCurrentUser((prev) => ({
+      ...prev,
+      depositBalance: Number(newDeposit.toFixed(2)),
+      withdrawalBalance: Number(newWithdrawal.toFixed(2)),
+    }));
+
+    const newTx: Transaction = {
+      id: `tx_${Date.now()}_game`,
+      userId: currentUser.id,
+      type: 'GAME_ENTRY',
+      amount: config.entryFee,
+      status: 'SUCCESS',
+      description: `${config.variant} Cash Rummy entry fee`,
+      timestamp: new Date().toLocaleString(),
+      balanceAfter: newDeposit + newWithdrawal,
+    };
+    setTransactions((prev) => [newTx, ...prev]);
 
     sounds.playCardDeal();
     setActiveGameConfig(config);
@@ -697,17 +734,11 @@ export const RummyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return true;
   };
 
-  // Game Won
-  const settleGameWin = (winnings: number, practice = false) => {
-    if (practice) {
-      setCurrentUser((prev) => ({
-        ...prev,
-        practiceChips: prev.practiceChips + winnings,
-      }));
-      return;
-    }
-
+  // Game Won (100% Real Cash Net Winnings Settlement)
+  const settleGameWin = (winnings: number) => {
+    triggerWinConfetti();
     sounds.playWinFanfare();
+
     const rake = (winnings * adminSettings.houseRakePercent) / 100;
     const netWin = Number((winnings - rake).toFixed(2));
 

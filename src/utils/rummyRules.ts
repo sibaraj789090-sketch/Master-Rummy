@@ -903,3 +903,132 @@ export function resolveDealsRound(
     tableWinnerId: isTableComplete ? rankedPlayerIds[0] : undefined,
   };
 }
+
+export interface CardMovementResult {
+  success: boolean;
+  newGroups: PlayingCard[][];
+  message?: string;
+}
+
+/**
+ * Move a single card from one meld group to another meld group (or to a new group if toGroupIdx is -1).
+ * Supports reordering if fromGroupIdx === toGroupIdx.
+ * Guarantees 100% card conservation (no card lost, no card duplicated).
+ */
+export function moveCardBetweenGroups(
+  groups: PlayingCard[][],
+  cardId: string,
+  fromGroupIdx: number,
+  toGroupIdx: number,
+  insertIndex?: number
+): CardMovementResult {
+  if (!groups || groups.length === 0) {
+    return { success: false, newGroups: groups, message: 'No card groups available' };
+  }
+
+  if (fromGroupIdx < 0 || fromGroupIdx >= groups.length) {
+    return { success: false, newGroups: groups, message: 'Invalid source group index' };
+  }
+
+  const clonedGroups = groups.map((g) => [...g]);
+  const sourceGroup = clonedGroups[fromGroupIdx];
+  const cardIdx = sourceGroup.findIndex((c) => c.id === cardId);
+
+  if (cardIdx === -1) {
+    return { success: false, newGroups: groups, message: 'Card not found in source group' };
+  }
+
+  const [cardToMove] = sourceGroup.splice(cardIdx, 1);
+
+  // If moving within the same group (reordering)
+  if (fromGroupIdx === toGroupIdx) {
+    const targetIdx =
+      insertIndex !== undefined && insertIndex >= 0
+        ? Math.min(insertIndex, sourceGroup.length)
+        : sourceGroup.length;
+    sourceGroup.splice(targetIdx, 0, cardToMove);
+    return { success: true, newGroups: clonedGroups, message: 'Card reordered in group' };
+  }
+
+  // Moving to a new group
+  if (toGroupIdx === -1 || toGroupIdx >= clonedGroups.length) {
+    clonedGroups.push([cardToMove]);
+  } else {
+    // Moving to an existing destination group
+    const destGroup = clonedGroups[toGroupIdx];
+    const targetIdx =
+      insertIndex !== undefined && insertIndex >= 0
+        ? Math.min(insertIndex, destGroup.length)
+        : destGroup.length;
+    destGroup.splice(targetIdx, 0, cardToMove);
+  }
+
+  // Remove empty groups
+  const cleanedGroups = clonedGroups.filter((g) => g.length > 0);
+
+  // Card conservation safety assertion
+  const origCount = groups.flat().length;
+  const newCount = cleanedGroups.flat().length;
+  if (origCount !== newCount) {
+    return { success: false, newGroups: groups, message: 'Card conservation error' };
+  }
+
+  return { success: true, newGroups: cleanedGroups, message: 'Card moved successfully' };
+}
+
+/**
+ * Move multiple selected cards to a destination group (or new group if toGroupIdx is -1).
+ */
+export function moveMultipleCardsBetweenGroups(
+  groups: PlayingCard[][],
+  cardIds: string[],
+  toGroupIdx: number,
+  insertIndex?: number
+): CardMovementResult {
+  if (!groups || groups.length === 0 || !cardIds || cardIds.length === 0) {
+    return { success: false, newGroups: groups, message: 'No cards selected' };
+  }
+
+  const cardIdSet = new Set(cardIds);
+  const cardsToMove: PlayingCard[] = [];
+
+  // Remove selected cards from all their source groups
+  const clonedGroups = groups.map((g) => {
+    const remaining: PlayingCard[] = [];
+    g.forEach((c) => {
+      if (cardIdSet.has(c.id)) {
+        cardsToMove.push(c);
+      } else {
+        remaining.push(c);
+      }
+    });
+    return remaining;
+  });
+
+  if (cardsToMove.length === 0) {
+    return { success: false, newGroups: groups, message: 'None of the specified cards were found' };
+  }
+
+  // Place into destination group
+  if (toGroupIdx === -1 || toGroupIdx >= clonedGroups.length) {
+    clonedGroups.push(cardsToMove);
+  } else {
+    const destGroup = clonedGroups[toGroupIdx];
+    const targetIdx =
+      insertIndex !== undefined && insertIndex >= 0
+        ? Math.min(insertIndex, destGroup.length)
+        : destGroup.length;
+    destGroup.splice(targetIdx, 0, ...cardsToMove);
+  }
+
+  const cleanedGroups = clonedGroups.filter((g) => g.length > 0);
+
+  // Card conservation assertion
+  const origCount = groups.flat().length;
+  const newCount = cleanedGroups.flat().length;
+  if (origCount !== newCount) {
+    return { success: false, newGroups: groups, message: 'Card conservation error' };
+  }
+
+  return { success: true, newGroups: cleanedGroups, message: 'Cards moved successfully' };
+}

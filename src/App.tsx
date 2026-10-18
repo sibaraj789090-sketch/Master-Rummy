@@ -4,7 +4,6 @@ import { TopHeader } from './components/mobile/TopHeader';
 import { BottomNav } from './components/mobile/BottomNav';
 import { LobbyView } from './components/mobile/LobbyView';
 import { TournamentsView } from './components/mobile/TournamentsView';
-import { ChallengerView } from './components/mobile/ChallengerView';
 import { ReferEarnView } from './components/mobile/ReferEarnView';
 import { DrawerMenu } from './components/mobile/DrawerMenu';
 import { AddCashModal } from './components/mobile/AddCashModal';
@@ -71,13 +70,13 @@ const MainApp: React.FC = () => {
               onOpenAddCash={() => setIsAddCashOpen(true)}
               onOpenTournaments={() => {
                 sounds.playCardClick();
-                setActiveScreen('CHALLENGER');
+                setActiveScreen('TOURNAMENTS');
               }}
               onOpenInstall={() => setIsInstallOpen(true)}
             />
           )}
 
-          {activeScreen === 'CHALLENGER' && <ChallengerView />}
+          {(activeScreen === 'TOURNAMENTS' || activeScreen === 'CHALLENGER') && <TournamentsView />}
 
           {activeScreen === 'REFER_EARN' && <ReferEarnView />}
         </div>
