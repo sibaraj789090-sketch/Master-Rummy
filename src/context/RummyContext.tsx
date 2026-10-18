@@ -555,6 +555,9 @@ export const RummyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     adminQrCodeUrl: 'https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=upi://pay?pa=masterrummy@okaxis&pn=MasterRummy&cu=INR',
     minDeposit: 100,
     maxDeposit: 50000,
+    customApkUrl: '/downloads/MasterRummy.apk',
+    apkVersion: 'v2.4.1',
+    apkFileSize: '18.4 MB',
   });
 
   const [activeLiveTables, setActiveLiveTables] = useState<import('../types/rummy').ActiveGameTable[]>([

@@ -141,6 +141,9 @@ export interface AdminSettings {
   adminQrCodeUrl?: string;
   minDeposit?: number;
   maxDeposit?: number;
+  customApkUrl?: string;
+  apkVersion?: string;
+  apkFileSize?: string;
 }
 
 export interface BotSettings {

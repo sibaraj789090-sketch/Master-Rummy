@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
 import { useRummy } from '../../context/RummyContext';
-import { Bell, ChevronDown, Plus, Sparkles, X, Download, Database, RotateCcw } from 'lucide-react';
+import { Bell, ChevronDown, Plus, Sparkles, X, Download, Database, RotateCcw, Smartphone } from 'lucide-react';
 import { sounds } from '../../utils/sound';
 import { getSupabaseConfig } from '../../lib/supabase';
+import { usePWAInstall } from '../../utils/usePWAInstall';
+import { downloadHostedApk } from '../../utils/apkDownloader';
 
 interface TopHeaderProps {
   onOpenProfile: () => void;
@@ -17,8 +19,10 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
   onOpenInstall,
   onOpenSupabaseSetup,
 }) => {
-  const { currentUser, setActiveScreen, notificationBadgeCount, unreadBroadcast, dismissBroadcast } = useRummy();
+  const { currentUser, setActiveScreen, notificationBadgeCount, unreadBroadcast, dismissBroadcast, adminSettings } = useRummy();
+  const { isInstallable, isInstalled, install } = usePWAInstall();
   const [showBalanceDropdown, setShowBalanceDropdown] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
 
   return (
     <div className="relative z-30">
@@ -171,17 +175,57 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
 
 
 
-          {/* Install / Download App Button */}
+          {/* Direct Android APK Download Button */}
+          <a
+            href={adminSettings.customApkUrl || '/downloads/MasterRummy.apk'}
+            download="MasterRummy.apk"
+            onClick={() => {
+              sounds.playCoinSound();
+              setIsDownloading(true);
+              downloadHostedApk(
+                adminSettings.customApkUrl || '/downloads/MasterRummy.apk',
+                'MasterRummy.apk',
+                undefined,
+                () => setTimeout(() => setIsDownloading(false), 2500)
+              );
+            }}
+            title="Download Official Android APK (Direct)"
+            className="flex items-center gap-1 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-white px-2 py-1 rounded-full text-[10px] font-black shadow-sm transition-transform active:scale-95 border border-emerald-400/50 cursor-pointer"
+          >
+            <Download className={`w-3 h-3 stroke-[3] ${isDownloading ? 'animate-bounce text-yellow-300' : ''}`} />
+            <span className="hidden xs:inline">APK</span>
+          </a>
+
+          {/* Working PWA Install App Button */}
+          {!isInstalled && (
+            <button
+              onClick={async () => {
+                sounds.playCoinSound();
+                if (isInstallable) {
+                  await install();
+                } else if (onOpenInstall) {
+                  onOpenInstall();
+                }
+              }}
+              title={isInstallable ? 'Install Web App (1-Click)' : 'Install App'}
+              className="flex items-center gap-1 bg-gradient-to-r from-amber-400 to-yellow-500 hover:from-amber-300 hover:to-yellow-400 text-amber-950 px-2 py-1 rounded-full text-[10px] font-black shadow-sm transition-transform active:scale-95 border border-amber-300/60"
+            >
+              <Smartphone className="w-3 h-3 stroke-[2.5]" />
+              <span className="hidden xs:inline">Install</span>
+            </button>
+          )}
+
+          {/* Quick Help / Modal guide button */}
           {onOpenInstall && (
             <button
               onClick={() => {
-                sounds.playCoinSound();
+                sounds.playCardClick();
                 onOpenInstall();
               }}
-              title="Download & Install App"
-              className="flex items-center gap-1 bg-amber-400 hover:bg-amber-300 text-amber-950 px-2 py-1 rounded-full text-[10px] font-black shadow-sm transition-transform active:scale-95"
+              title="App Installation Guide & Options"
+              className="p-1 rounded-full bg-black/25 hover:bg-black/40 text-amber-200 transition-colors"
             >
-              <Download className="w-3 h-3 stroke-[3]" />
+              <Sparkles className="w-3.5 h-3.5" />
             </button>
           )}
 

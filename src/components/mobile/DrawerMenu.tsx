@@ -22,9 +22,12 @@ import {
   Lock,
   KeyRound,
   Trophy,
+  Download,
 } from 'lucide-react';
 import { sounds } from '../../utils/sound';
 import { verifyAdminCredentials } from '../../lib/supabase';
+import { downloadHostedApk } from '../../utils/apkDownloader';
+import { usePWAInstall } from '../../utils/usePWAInstall';
 
 interface DrawerMenuProps {
   isOpen: boolean;
@@ -55,7 +58,9 @@ export const DrawerMenu: React.FC<DrawerMenuProps> = ({
   onOpenSupabaseSetup,
   onOpenDocumentsVerification,
 }) => {
-  const { currentUser, setActiveScreen, soundEnabled, setSoundEnabled, isAdmin, checkAdminPermissions } = useRummy();
+  const { currentUser, setActiveScreen, soundEnabled, setSoundEnabled, isAdmin, checkAdminPermissions, adminSettings } = useRummy();
+  const { isInstallable, isInstalled, install } = usePWAInstall();
+  const [isDownloading, setIsDownloading] = useState(false);
 
   const [walletExpanded, setWalletExpanded] = useState(true);
   const [helpExpanded, setHelpExpanded] = useState(false);
@@ -151,31 +156,74 @@ export const DrawerMenu: React.FC<DrawerMenuProps> = ({
         </div>
 
         {/* Download & Install App Banner Card */}
-        {onOpenInstall && (
-          <div className="p-3 bg-gradient-to-r from-amber-500/20 via-yellow-500/10 to-transparent border-b border-amber-500/30">
-            <button
-              onClick={() => {
-                sounds.playCoinSound();
-                onClose();
-                onOpenInstall();
-              }}
-              className="w-full bg-gradient-to-r from-amber-500 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 text-stone-950 font-black text-xs py-2.5 px-3 rounded-xl shadow-lg active:scale-95 transition-all flex items-center justify-between"
-            >
-              <div className="flex items-center gap-2">
-                <div className="w-7 h-7 rounded-lg bg-stone-950 text-amber-400 flex items-center justify-center">
-                  <Smartphone className="w-4 h-4" />
-                </div>
-                <div className="text-left">
-                  <p className="leading-tight text-xs font-black">DOWNLOAD APP</p>
-                  <p className="text-[10px] text-stone-900 font-semibold leading-tight">Install on your phone</p>
-                </div>
+        <div className="p-3 bg-gradient-to-r from-amber-500/20 via-yellow-500/10 to-transparent border-b border-amber-500/30 space-y-2">
+          {/* Direct APK Download Button */}
+          <a
+            href={adminSettings.customApkUrl || '/downloads/MasterRummy.apk'}
+            download="MasterRummy.apk"
+            onClick={() => {
+              sounds.playCoinSound();
+              setIsDownloading(true);
+              downloadHostedApk(
+                adminSettings.customApkUrl || '/downloads/MasterRummy.apk',
+                'MasterRummy.apk',
+                undefined,
+                () => setTimeout(() => setIsDownloading(false), 2500)
+              );
+            }}
+            className="w-full bg-gradient-to-r from-emerald-600 via-green-600 to-emerald-700 hover:from-emerald-500 hover:to-green-500 text-white font-black text-xs py-2.5 px-3 rounded-xl shadow-lg active:scale-95 transition-all flex items-center justify-between cursor-pointer border border-emerald-400/40"
+          >
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-lg bg-emerald-950 text-emerald-300 flex items-center justify-center">
+                <Download className={`w-4 h-4 ${isDownloading ? 'animate-bounce text-yellow-300' : ''}`} />
               </div>
-              <span className="bg-stone-950 text-amber-400 text-[10px] px-2 py-0.5 rounded-full font-black">
-                APK
-              </span>
-            </button>
+              <div className="text-left">
+                <p className="leading-tight text-xs font-black">DOWNLOAD ANDROID APK</p>
+                <p className="text-[10px] text-emerald-100 font-semibold leading-tight">
+                  {isDownloading ? 'Downloading MasterRummy.apk...' : 'Direct Hosted File · 18.4 MB'}
+                </p>
+              </div>
+            </div>
+            <span className="bg-emerald-950 text-emerald-300 text-[10px] px-2 py-0.5 rounded-full font-black">
+              APK
+            </span>
+          </a>
+
+          {/* Quick PWA Install & Guide row */}
+          <div className="flex items-center gap-1.5 pt-0.5">
+            {!isInstalled && (
+              <button
+                onClick={async () => {
+                  sounds.playCoinSound();
+                  if (isInstallable) {
+                    await install();
+                  } else if (onOpenInstall) {
+                    onOpenInstall();
+                  }
+                }}
+                className="flex-1 py-1.5 px-2.5 bg-stone-900 hover:bg-stone-800 text-amber-300 text-[11px] font-bold rounded-lg border border-stone-700 flex items-center justify-center gap-1.5 transition-colors"
+              >
+                <Smartphone className="w-3.5 h-3.5 text-amber-400" />
+                <span>{isInstallable ? 'Install PWA (1-Click)' : 'Install App'}</span>
+              </button>
+            )}
+
+            {onOpenInstall && (
+              <button
+                onClick={() => {
+                  sounds.playCardClick();
+                  onClose();
+                  onOpenInstall();
+                }}
+                className="py-1.5 px-2 bg-stone-900 hover:bg-stone-800 text-stone-300 text-[11px] font-bold rounded-lg border border-stone-700 flex items-center justify-center gap-1 transition-colors"
+                title="Installation instructions & APK build details"
+              >
+                <Sparkles className="w-3 h-3 text-amber-400" />
+                <span>Guide</span>
+              </button>
+            )}
           </div>
-        )}
+        </div>
 
         {/* Menu Sections List */}
         <div className="flex-1 divide-y divide-stone-800 text-xs">

@@ -20,10 +20,14 @@ import {
   Play,
   RotateCcw,
   ShieldCheck,
+  Download,
+  Smartphone,
 } from 'lucide-react';
 import { sounds } from '../../utils/sound';
 import { TournamentsView } from './TournamentsView';
 import { multiplayerService } from '../../services/multiplayerService';
+import { downloadHostedApk } from '../../utils/apkDownloader';
+import { usePWAInstall } from '../../utils/usePWAInstall';
 
 interface LobbyViewProps {
   onOpenAddCash: () => void;
@@ -37,6 +41,8 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
   onOpenInstall,
 }) => {
   const { launchGame, currentUser, adminSettings, setMultiplayerState } = useRummy();
+  const { isInstallable, isInstalled, install } = usePWAInstall();
+  const [isDownloadingApk, setIsDownloadingApk] = useState(false);
 
   // Matchmaking & Room Code states
   const [isMatchmakingOpen, setIsMatchmakingOpen] = useState(false);
@@ -259,6 +265,82 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
               <span className="text-[8px] font-black text-amber-300 uppercase">CLAIM</span>
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Official Master Rummy Android APK & PWA Download Strip */}
+      <div className="bg-gradient-to-r from-stone-900 via-zinc-900 to-stone-900 text-white px-3 py-2 border-b border-amber-400/20 shadow-md flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-400 to-yellow-600 p-0.5 shadow-sm shrink-0 flex items-center justify-center">
+            <img src="/pwa-192x192.png" alt="Master Rummy" className="w-full h-full object-cover rounded-md" />
+          </div>
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-black text-white truncate">Master Rummy Official</span>
+              <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[9px] font-black px-1.5 py-0.2 rounded-full">
+                {adminSettings.apkVersion || 'v2.4.1'}
+              </span>
+            </div>
+            <p className="text-[10px] text-amber-200/90 font-medium truncate">
+              {isDownloadingApk ? 'Downloading MasterRummy.apk (18.4 MB)...' : 'Android APK · 60FPS · Instant UPI Gaming'}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-1.5 shrink-0">
+          {/* Working APK Download Button */}
+          <a
+            href={adminSettings.customApkUrl || '/downloads/MasterRummy.apk'}
+            download="MasterRummy.apk"
+            onClick={() => {
+              sounds.playCoinSound();
+              setIsDownloadingApk(true);
+              downloadHostedApk(
+                adminSettings.customApkUrl || '/downloads/MasterRummy.apk',
+                'MasterRummy.apk',
+                undefined,
+                () => setTimeout(() => setIsDownloadingApk(false), 2500)
+              );
+            }}
+            className="flex items-center gap-1 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-white text-[10px] font-black px-2.5 py-1.5 rounded-xl shadow-md transition-all active:scale-95 border border-emerald-400/40 cursor-pointer"
+            title="Download Android APK (Direct Hosted File)"
+          >
+            <Download className={`w-3.5 h-3.5 stroke-[2.5] ${isDownloadingApk ? 'animate-bounce text-yellow-300' : ''}`} />
+            <span>APK ({adminSettings.apkFileSize || '18 MB'})</span>
+          </a>
+
+          {/* Working PWA Install Button */}
+          {!isInstalled && (
+            <button
+              onClick={async () => {
+                sounds.playCoinSound();
+                if (isInstallable) {
+                  await install();
+                } else if (onOpenInstall) {
+                  onOpenInstall();
+                }
+              }}
+              className="flex items-center gap-1 bg-gradient-to-r from-amber-400 to-yellow-500 hover:from-amber-300 hover:to-yellow-400 text-stone-950 text-[10px] font-black px-2 py-1.5 rounded-xl shadow-md transition-all active:scale-95 border border-amber-300"
+              title={isInstallable ? 'Install Web App (1-Click)' : 'Install App'}
+            >
+              <Smartphone className="w-3.5 h-3.5 stroke-[2.5]" />
+              <span>Install</span>
+            </button>
+          )}
+
+          {/* Guide / Info button */}
+          {onOpenInstall && (
+            <button
+              onClick={() => {
+                sounds.playCardClick();
+                onOpenInstall();
+              }}
+              title="Installation Guide"
+              className="w-7 h-7 rounded-xl bg-white/10 hover:bg-white/20 text-amber-200 flex items-center justify-center transition-colors"
+            >
+              <Info className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       </div>
 
