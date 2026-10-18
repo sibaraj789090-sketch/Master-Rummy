@@ -24,6 +24,7 @@ import {
   DollarSign,
 } from 'lucide-react';
 import { sounds } from '../../utils/sound';
+import { verifyAdminCredentials } from '../../lib/supabase';
 
 interface AdminPanelProps {
   onSwitchToPlayer: () => void;
@@ -46,11 +47,106 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onSwitchToPlayer }) => {
     adminUpdateSettings,
     adminSendBroadcast,
     adminAddCoupon,
+    isAdmin,
+    checkAdminPermissions,
   } = useRummy();
+
+  const [authAdminEmail, setAuthAdminEmail] = useState('');
+  const [authAdminKey, setAuthAdminKey] = useState('');
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [isVerifying, setIsVerifying] = useState(false);
 
   const [activeTab, setActiveTab] = useState<
     'OVERVIEW' | 'WITHDRAWALS' | 'USERS' | 'TOURNAMENTS' | 'COUPONS' | 'BROADCAST' | 'LEDGER'
   >('OVERVIEW');
+
+  // Hard gatekeeper for admin permissions
+  if (!isAdmin) {
+    return (
+      <div className="min-h-screen bg-stone-950 text-white flex flex-col items-center justify-center p-4">
+        <div className="max-w-md w-full bg-stone-900 border border-amber-500/30 rounded-3xl p-6 shadow-2xl text-center">
+          <div className="w-14 h-14 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center mx-auto mb-4 border border-amber-400/30">
+            <ShieldCheck className="w-8 h-8" />
+          </div>
+          <h2 className="text-xl font-black text-amber-300">Admin Permissions Required</h2>
+          <p className="text-xs text-stone-400 mt-1 mb-5">
+            This operations management console is restricted. Authenticate with verified administrator credentials to access.
+          </p>
+
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              setIsVerifying(true);
+              setAuthError(null);
+              const res = await verifyAdminCredentials(authAdminEmail, authAdminKey);
+              if (res.success) {
+                sounds.playWinFanfare();
+                await checkAdminPermissions();
+              } else {
+                setAuthError(res.error || 'Access denied: Invalid credentials');
+              }
+              setIsVerifying(false);
+            }}
+            className="space-y-3 text-left"
+          >
+            <div>
+              <label className="text-[10px] uppercase font-bold text-stone-400 block mb-1">
+                Admin Email
+              </label>
+              <input
+                type="email"
+                value={authAdminEmail}
+                onChange={(e) => setAuthAdminEmail(e.target.value)}
+                placeholder="admin@example.com"
+                required
+                className="w-full bg-stone-950 border border-stone-700 rounded-xl px-3 py-2.5 text-xs text-stone-100 focus:outline-hidden focus:border-amber-400"
+              />
+            </div>
+
+            <div>
+              <label className="text-[10px] uppercase font-bold text-stone-400 block mb-1">
+                Security Key
+              </label>
+              <input
+                type="password"
+                value={authAdminKey}
+                onChange={(e) => setAuthAdminKey(e.target.value)}
+                placeholder="••••••••••••"
+                required
+                className="w-full bg-stone-950 border border-stone-700 rounded-xl px-3 py-2.5 text-xs text-stone-100 focus:outline-hidden focus:border-amber-400 font-mono"
+              />
+            </div>
+
+            {authError && (
+              <div className="p-2.5 rounded-xl bg-rose-950/60 border border-rose-500/50 text-rose-300 text-xs font-semibold">
+                {authError}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={isVerifying}
+              className="w-full py-3 bg-gradient-to-r from-amber-500 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 text-stone-950 font-black text-xs uppercase tracking-wider rounded-xl shadow-lg transition-transform active:scale-95"
+            >
+              {isVerifying ? 'VERIFYING...' : 'VERIFY & ENTER ADMIN CONSOLE'}
+            </button>
+          </form>
+
+          <div className="mt-4 pt-4 border-t border-stone-800">
+            <button
+              onClick={() => {
+                sounds.playCardClick();
+                onSwitchToPlayer();
+              }}
+              className="text-xs text-stone-400 hover:text-white font-semibold transition-colors"
+            >
+              ← Return to Game Table / Lobby
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // Withdrawal filters
   const [withdrawalFilter, setWithdrawalFilter] = useState<'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED'>('PENDING');

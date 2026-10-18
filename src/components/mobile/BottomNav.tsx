@@ -11,7 +11,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({ onOpenMenu }) => {
   const { activeScreen, setActiveScreen } = useRummy();
 
   return (
-    <div className="bg-[#121212] border-t border-stone-800 text-stone-400 py-1.5 px-2 flex items-center justify-around z-30 select-none shadow-2xl">
+    <div className="bg-[#121212] border-t border-stone-800 text-stone-400 pt-1.5 pb-[max(env(safe-area-inset-bottom,0px),0.5rem)] px-2 flex items-center justify-around z-30 select-none shadow-2xl">
       {/* 1. Add Cash */}
       <button
         onClick={() => {

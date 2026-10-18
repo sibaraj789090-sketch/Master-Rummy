@@ -13,7 +13,7 @@ import {
   GameSession,
 } from '../types/rummy';
 import { sounds } from '../utils/sound';
-import { getSavedAuthUser } from '../lib/supabase';
+import { getSavedAuthUser, checkIsUserAdmin } from '../lib/supabase';
 
 interface RummyContextType {
   currentUser: UserProfile;
@@ -41,6 +41,8 @@ interface RummyContextType {
   multiplayerSession: import('../types/rummy').GameSession | null;
   notificationBadgeCount: number;
   unreadBroadcast: string | null;
+  isAdmin: boolean;
+  checkAdminPermissions: () => Promise<boolean>;
 
   // Actions
   setActiveScreen: (screen: 'LOBBY' | 'CHALLENGER' | 'REFER_EARN' | 'WALLET' | 'WITHDRAW' | 'ADD_CASH' | 'GAME_TABLE') => void;
@@ -400,9 +402,16 @@ export const RummyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [multiplayerSession, setMultiplayerSession] = useState<GameSession | null>(null);
 
   const [notificationBadgeCount, setNotificationBadgeCount] = useState(1);
-  const [unreadBroadcast, setUnreadBroadcast] = useState<string | null>('Welcome to Master Rummy! Play responsibly 18+');
+  const [unreadBroadcast, setUnreadBroadcast] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState<boolean>(false);
 
-  // Restore saved auth user on initial launch
+  const checkAdminPermissions = async (): Promise<boolean> => {
+    const admin = await checkIsUserAdmin();
+    setIsAdmin(admin);
+    return admin;
+  };
+
+  // Restore saved auth user on initial launch and check admin role
   useEffect(() => {
     const saved = getSavedAuthUser();
     if (saved) {
@@ -415,6 +424,7 @@ export const RummyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         email: saved.email || prev.email,
       }));
     }
+    checkIsUserAdmin(saved).then((admin) => setIsAdmin(admin));
   }, []);
 
   const setMultiplayerState = (
@@ -892,6 +902,8 @@ export const RummyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         multiplayerSession,
         notificationBadgeCount,
         unreadBroadcast,
+        isAdmin,
+        checkAdminPermissions,
         setActiveScreen,
         setSoundEnabled,
         dismissBroadcast,

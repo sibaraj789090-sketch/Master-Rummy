@@ -324,3 +324,89 @@ export const getSavedAuthUser = (): SupabaseAuthUser | null => {
   }
 };
 
+// ==========================================
+// ADMIN PERMISSION & VERIFICATION HELPERS
+// ==========================================
+
+export const AUTHORIZED_ADMIN_EMAILS = [
+  'ranidas784170@gmail.com',
+  'admin@masterrummy.com',
+  'admin@masterrummy.internal',
+];
+
+export const checkIsUserAdmin = async (user?: SupabaseAuthUser | null): Promise<boolean> => {
+  const activeUser = user || getSavedAuthUser();
+
+  // 1. Check verified admin emails
+  if (activeUser?.email && AUTHORIZED_ADMIN_EMAILS.includes(activeUser.email.toLowerCase().trim())) {
+    return true;
+  }
+
+  // 2. Check Supabase DB profile role if configured
+  const cfg = getSupabaseConfig();
+  if (cfg.isConfigured && activeUser?.id) {
+    try {
+      const { data } = await supabase
+        .from('profiles')
+        .select('is_admin, role')
+        .eq('id', activeUser.id)
+        .maybeSingle();
+
+      if (data && (data.is_admin === true || data.role === 'admin' || data.role === 'superadmin')) {
+        return true;
+      }
+    } catch {}
+  }
+
+  // 3. Check session storage for verified admin token
+  if (typeof window !== 'undefined') {
+    const adminToken = sessionStorage.getItem('master_rummy_admin_verified');
+    if (adminToken === 'true') {
+      return true;
+    }
+  }
+
+  return false;
+};
+
+export const verifyAdminCredentials = async (
+  email: string,
+  secretKey: string
+): Promise<{ success: boolean; error?: string }> => {
+  const cleanEmail = email.trim().toLowerCase();
+  const cleanKey = secretKey.trim();
+
+  const isAuthorizedEmail =
+    AUTHORIZED_ADMIN_EMAILS.includes(cleanEmail) || cleanEmail.endsWith('@masterrummy.internal');
+  const isValidAdminKey =
+    cleanKey === 'MasterAdmin@2026' || cleanKey === 'AdminPass@611' || cleanKey === 'admin123';
+
+  if (!isAuthorizedEmail) {
+    return {
+      success: false,
+      error: 'Access denied: This email is not authorized for Admin Panel access.',
+    };
+  }
+
+  if (!isValidAdminKey) {
+    return {
+      success: false,
+      error: 'Invalid Admin Security Key or credentials.',
+    };
+  }
+
+  if (typeof window !== 'undefined') {
+    sessionStorage.setItem('master_rummy_admin_verified', 'true');
+    sessionStorage.setItem('master_rummy_admin_email', cleanEmail);
+  }
+
+  return { success: true };
+};
+
+export const revokeAdminAccess = () => {
+  if (typeof window !== 'undefined') {
+    sessionStorage.removeItem('master_rummy_admin_verified');
+    sessionStorage.removeItem('master_rummy_admin_email');
+  }
+};
+

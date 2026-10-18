@@ -917,10 +917,13 @@ class MultiplayerService {
         });
 
         // Update winner practice chips and stats in profiles
-        await supabase.rpc('increment_profile_win', {
-          p_user_id: params.winnerId,
-          p_chips: params.chipsPool,
-        }).catch(async () => {
+        try {
+          const { error: rpcError } = await supabase.rpc('increment_profile_win', {
+            p_user_id: params.winnerId,
+            p_chips: params.chipsPool,
+          });
+          if (rpcError) throw rpcError;
+        } catch {
           // Direct fallback
           const { data: profile } = await supabase
             .from('profiles')
@@ -938,7 +941,7 @@ class MultiplayerService {
               })
               .eq('id', params.winnerId);
           }
-        });
+        }
       } catch (err) {
         console.warn('Record match result fallback:', err);
       }

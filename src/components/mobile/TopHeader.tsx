@@ -25,9 +25,9 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
 
   return (
     <div className="relative z-30">
-      {/* Broadcast alert bar if active */}
+      {/* Floating Broadcast alert if an urgent admin broadcast is received */}
       {unreadBroadcast && (
-        <div className="bg-gradient-to-r from-amber-600 to-amber-700 text-amber-950 px-3 py-1.5 flex items-center justify-between text-xs font-semibold shadow-sm">
+        <div className="absolute top-full left-2 right-2 mt-1 z-50 bg-gradient-to-r from-amber-600 to-amber-700 text-amber-950 px-3 py-1.5 rounded-lg flex items-center justify-between text-xs font-semibold shadow-xl border border-amber-400/40">
           <div className="flex items-center gap-1.5 truncate">
             <Sparkles className="w-3.5 h-3.5 shrink-0 text-amber-950 animate-spin" />
             <span className="truncate">{unreadBroadcast}</span>
@@ -37,15 +37,15 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
               sounds.playCardClick();
               dismissBroadcast();
             }}
-            className="p-0.5 hover:bg-black/10 rounded ml-2"
+            className="p-1 hover:bg-black/10 rounded ml-2"
           >
             <X className="w-3.5 h-3.5" />
           </button>
         </div>
       )}
 
-      {/* Main Top Bar */}
-      <div className="bg-[#59040c] text-white px-3 py-2 flex items-center justify-between shadow-md border-b border-red-950/40">
+      {/* Main Top Bar with Safe Area Inset support for Android/iOS */}
+      <div className="bg-[#59040c] text-white px-3 pt-[max(env(safe-area-inset-top,0px),0.5rem)] pb-2 flex items-center justify-between shadow-md border-b border-red-950/40 select-none">
         {/* Left: User Avatar & Username */}
         <div
           onClick={() => {

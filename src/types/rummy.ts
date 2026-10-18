@@ -91,6 +91,7 @@ export interface ActiveGameTable {
   prizePool: number;
   status: 'WAITING' | 'IN_PLAY' | 'FINISHED';
   currentPlayers: number;
+  gameTypeDetail?: string; // '101' | '201' | '2' | '3' | 'Classic' | 'Double'
 }
 
 export interface Coupon {
@@ -117,9 +118,12 @@ export interface GameRoom {
   id: string;
   room_code: string;
   variant: 'Points' | 'Pool' | 'Deals';
+  game_type_detail?: string; // '101' | '201' | '2' | '3' | 'Classic' | 'Double'
   max_players: 2 | 6;
   entry_chips: number;
   point_value: number;
+  elimination_threshold?: number;
+  total_deals?: number;
   status: 'WAITING' | 'COUNTDOWN' | 'IN_PLAY' | 'COMPLETED' | 'ABANDONED';
   created_by?: string;
   created_at: string;
@@ -137,16 +141,32 @@ export interface RoomPlayer {
   joined_at: string;
 }
 
+export interface RoundScoreRecord {
+  round: number;
+  deal?: number;
+  winnerId: string;
+  scores: Record<string, number>;
+  cumulativeScores: Record<string, number>;
+  eliminatedIds?: string[];
+}
+
 export interface GameSession {
   id: string;
   room_id: string;
   round_number: number;
+  deal_number?: number;
+  total_deals?: number;
+  elimination_threshold?: number;
+  cumulative_scores?: Record<string, number>;
+  eliminated_user_ids?: string[];
+  round_history?: RoundScoreRecord[];
+  is_table_completed?: boolean;
   wild_joker_card: PlayingCard;
   closed_deck_count: number;
   discard_pile: PlayingCard[];
   current_turn_seat: number;
   turn_timer: number;
-  status: 'ACTIVE' | 'FINISHED';
+  status: 'ACTIVE' | 'ROUND_FINISHED' | 'FINISHED';
   winner_user_id?: string;
 }
 

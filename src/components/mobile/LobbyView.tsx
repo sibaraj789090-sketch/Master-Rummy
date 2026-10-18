@@ -61,7 +61,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
   // Variant specific parameters
   const [pointsType, setPointsType] = useState<'Classic' | 'Double'>('Classic');
   const [poolType, setPoolType] = useState<'101' | '201'>('101');
-  const [dealsCount, setDealsCount] = useState<'3' | '6'>('3');
+  const [dealsCount, setDealsCount] = useState<'2' | '3'>('2');
 
   // Sliders
   // For Points: Point values [0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 25, 50, 125]
@@ -455,7 +455,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                       poolType === '101' ? 'bg-[#7a0c16] text-white shadow-xs' : 'text-slate-700 hover:bg-slate-200'
                     }`}
                   >
-                    101
+                    101 Pool
                   </button>
                   <button
                     onClick={() => {
@@ -466,7 +466,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                       poolType === '201' ? 'bg-[#7a0c16] text-white shadow-xs' : 'text-slate-700 hover:bg-slate-200'
                     }`}
                   >
-                    201
+                    201 Pool
                   </button>
                 </div>
               )}
@@ -476,32 +476,64 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                   <button
                     onClick={() => {
                       sounds.playCardClick();
+                      setDealsCount('2');
+                    }}
+                    className={`flex-1 py-2 text-xs font-extrabold rounded-md transition-colors ${
+                      dealsCount === '2' ? 'bg-[#7a0c16] text-white shadow-xs' : 'text-slate-700 hover:bg-slate-200'
+                    }`}
+                  >
+                    2 Deals
+                  </button>
+                  <button
+                    onClick={() => {
+                      sounds.playCardClick();
                       setDealsCount('3');
                     }}
                     className={`flex-1 py-2 text-xs font-extrabold rounded-md transition-colors ${
                       dealsCount === '3' ? 'bg-[#7a0c16] text-white shadow-xs' : 'text-slate-700 hover:bg-slate-200'
                     }`}
                   >
-                    3
-                  </button>
-                  <button
-                    onClick={() => {
-                      sounds.playCardClick();
-                      setDealsCount('6');
-                    }}
-                    className={`flex-1 py-2 text-xs font-extrabold rounded-md transition-colors ${
-                      dealsCount === '6' ? 'bg-[#7a0c16] text-white shadow-xs' : 'text-slate-700 hover:bg-slate-200'
-                    }`}
-                  >
-                    6
+                    3 Deals
                   </button>
                 </div>
               )}
             </div>
           </div>
 
+          {/* Rules Summary Badge for Current Game Mode */}
+          <div className="bg-amber-50 border border-amber-200/80 rounded-xl p-2.5 shadow-xs text-center text-xs">
+            {variant === 'Points' && (
+              <div>
+                <span className="font-black text-amber-950 uppercase tracking-wide">Points Rummy</span>
+                <p className="text-[11px] text-amber-900/90 mt-0.5">
+                  1 Round · ₹{currentPointVal}/point · Max penalty 80 pts · Drop: 20 pts (1st) / 40 pts (Mid)
+                </p>
+              </div>
+            )}
+            {variant === 'Pool' && (
+              <div>
+                <span className="font-black text-amber-950 uppercase tracking-wide">
+                  {poolType} Pool Rummy
+                </span>
+                <p className="text-[11px] text-amber-900/90 mt-0.5">
+                  Cumulative scoring · Elimination at {poolType} pts · Drop: {poolType === '101' ? '20' : '25'} pts (1st) / {poolType === '101' ? '40' : '50'} pts (Mid) · Last survivor wins
+                </p>
+              </div>
+            )}
+            {variant === 'Deals' && (
+              <div>
+                <span className="font-black text-amber-950 uppercase tracking-wide">
+                  {dealsCount} Deals Rummy
+                </span>
+                <p className="text-[11px] text-amber-900/90 mt-0.5">
+                  Exactly {dealsCount} deals · Scores accumulate across all deals · Lowest cumulative score wins table
+                </p>
+              </div>
+            )}
+          </div>
+
           {/* Value Display / Min Entry indicator (From Screenshots 1, 6, 7) */}
-          <div className="text-center pt-2">
+          <div className="text-center pt-1">
             {variant === 'Points' ? (
               <div className="flex items-center justify-center gap-3 text-sm font-bold">
                 <span className="text-slate-600">
@@ -779,19 +811,8 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
         </div>
       )}
 
-      {/* 6. Floating Promotional Badges (From Screenshots 1, 6, 7) */}
+      {/* 6. Floating Gift Reward Button */}
       <div className="fixed right-3 bottom-16 flex flex-col items-center gap-3 z-20">
-        {/* BUY 1 GET 3 Circular Badge */}
-        <button
-          onClick={() => {
-            sounds.playCoinSound();
-            onOpenAddCash();
-          }}
-          className="w-13 h-13 rounded-full bg-gradient-to-tr from-amber-500 to-yellow-300 text-amber-950 p-1 shadow-xl border-2 border-white flex flex-col items-center justify-center animate-bounce hover:scale-105 transition-transform"
-        >
-          <span className="text-[8px] font-black uppercase leading-tight">BUY 1</span>
-          <span className="text-[10px] font-black leading-tight text-red-700">GET 3</span>
-        </button>
 
         {/* GIFT Prize Box */}
         <button

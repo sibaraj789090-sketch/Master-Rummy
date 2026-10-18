@@ -5,6 +5,7 @@ import {
   createDeck,
   shuffleCards,
   sortHandCards,
+  autoSortHand,
   isPureSequence,
   isImpureSequence,
   isValidSet,
@@ -644,19 +645,12 @@ export const RummyTable: React.FC = () => {
     setSelectedCards([]);
   };
 
-  // Auto-Sort Cards
+  // Auto-Sort Cards into valid Pure Sequences, Impure Sequences, Sets & Ungrouped
   const handleAutoSort = () => {
     sounds.playCardClick();
     const allCards = cardGroups.flat();
-    const sorted = sortHandCards(allCards);
-
-    // Split nicely into 4 meld groups (as in screenshots: 3, 4, 3, 3 or similar)
-    const g1 = sorted.slice(0, 3);
-    const g2 = sorted.slice(3, 7);
-    const g3 = sorted.slice(7, 10);
-    const g4 = sorted.slice(10);
-
-    setCardGroups([g1, g2, g3, g4].filter((g) => g.length > 0));
+    const sortedGroups = autoSortHand(allCards, wildJokerRank);
+    setCardGroups(sortedGroups);
     setSelectedCards([]);
   };
 
@@ -1436,9 +1430,9 @@ export const RummyTable: React.FC = () => {
                 )}
               </div>
 
-              {/* Score Display: Score: 73 (2P) or Score: 80 (6P) */}
+              {/* Score Display: Real dynamically computed penalty points */}
               <div className="text-xs font-black text-stone-200">
-                Score: <span className="text-amber-400 font-mono">{playersMode === 2 ? 73 : 80}</span>
+                Score: <span className={`font-mono ${totalScorePoints === 0 ? 'text-emerald-400' : 'text-amber-400'}`}>{totalScorePoints}</span>
               </div>
             </div>
 

@@ -18,8 +18,12 @@ import {
   PlayCircle,
   Sparkles,
   Database,
+  Shield,
+  Lock,
+  KeyRound,
 } from 'lucide-react';
 import { sounds } from '../../utils/sound';
+import { verifyAdminCredentials } from '../../lib/supabase';
 
 interface DrawerMenuProps {
   isOpen: boolean;
@@ -29,6 +33,7 @@ interface DrawerMenuProps {
   onOpenTransactions: () => void;
   onOpenSupport: () => void;
   onOpenLogin: () => void;
+  onOpenAdmin: () => void;
   onOpenInstall?: () => void;
   onOpenLoadingScreen?: () => void;
   onOpenSupabaseSetup?: () => void;
@@ -42,11 +47,12 @@ export const DrawerMenu: React.FC<DrawerMenuProps> = ({
   onOpenTransactions,
   onOpenSupport,
   onOpenLogin,
+  onOpenAdmin,
   onOpenInstall,
   onOpenLoadingScreen,
   onOpenSupabaseSetup,
 }) => {
-  const { currentUser, setActiveScreen, soundEnabled, setSoundEnabled } = useRummy();
+  const { currentUser, setActiveScreen, soundEnabled, setSoundEnabled, isAdmin, checkAdminPermissions } = useRummy();
 
   const [walletExpanded, setWalletExpanded] = useState(true);
   const [helpExpanded, setHelpExpanded] = useState(false);
@@ -56,6 +62,13 @@ export const DrawerMenu: React.FC<DrawerMenuProps> = ({
 
   const [bgMusic, setBgMusic] = useState(true);
   const [vibration, setVibration] = useState(true);
+
+  // Admin verification modal state
+  const [showAdminLoginModal, setShowAdminLoginModal] = useState(false);
+  const [adminEmail, setAdminEmail] = useState(currentUser.email || 'ranidas784170@gmail.com');
+  const [adminKey, setAdminKey] = useState('');
+  const [adminAuthError, setAdminAuthError] = useState<string | null>(null);
+  const [isVerifyingAdmin, setIsVerifyingAdmin] = useState(false);
 
   if (!isOpen) return null;
 
@@ -463,6 +476,46 @@ export const DrawerMenu: React.FC<DrawerMenuProps> = ({
               </div>
             )}
           </div>
+
+          {/* Section 6: Admin Portal (Protected by Supabase & Real Admin Authentication) */}
+          <div className="py-2.5 px-4 bg-stone-950/40 border-t border-stone-800">
+            <button
+              onClick={async () => {
+                sounds.playCoinSound();
+                const verified = await checkAdminPermissions();
+                if (verified) {
+                  onClose();
+                  onOpenAdmin();
+                } else {
+                  setAdminAuthError(null);
+                  setShowAdminLoginModal(true);
+                }
+              }}
+              className="w-full bg-gradient-to-r from-amber-500/15 via-yellow-500/10 to-amber-500/5 hover:from-amber-500/25 hover:to-yellow-500/15 border border-amber-500/30 p-2.5 rounded-xl flex items-center justify-between text-left transition-all active:scale-[0.98] group"
+            >
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center border border-amber-400/40 shrink-0">
+                  <ShieldCheck className="w-4 h-4 text-amber-400" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-black text-xs text-amber-300">Admin Panel</span>
+                    {isAdmin ? (
+                      <span className="bg-emerald-500/25 text-emerald-400 text-[8px] font-black px-1.5 py-0.5 rounded-full border border-emerald-500/40">
+                        AUTHORIZED
+                      </span>
+                    ) : (
+                      <span className="bg-stone-800 text-stone-400 text-[8px] font-bold px-1.5 py-0.5 rounded-full border border-stone-700">
+                        SECURE
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-stone-400">Operations, Users & Ledger</p>
+                </div>
+              </div>
+              <ChevronRight className="w-4 h-4 text-amber-400 group-hover:translate-x-0.5 transition-transform" />
+            </button>
+          </div>
         </div>
 
         {/* Footer info (from Screenshot 2) */}
@@ -481,6 +534,105 @@ export const DrawerMenu: React.FC<DrawerMenuProps> = ({
           <p className="text-stone-500 font-mono text-[10px]">V2.2.9 (22)</p>
         </div>
       </div>
+
+      {/* Admin Authentication Verification Dialog */}
+      {showAdminLoginModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xs p-4 select-none">
+          <div className="bg-stone-900 border border-amber-500/40 text-white rounded-3xl p-5 max-w-xs w-full shadow-2xl relative">
+            <button
+              onClick={() => {
+                sounds.playCardClick();
+                setShowAdminLoginModal(false);
+              }}
+              className="absolute top-3.5 right-3.5 p-1 rounded-full bg-stone-800 hover:bg-stone-700 text-stone-400 hover:text-white"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <div className="flex items-center gap-2.5 mb-3">
+              <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center border border-amber-400/30">
+                <Lock className="w-5 h-5 text-amber-400" />
+              </div>
+              <div>
+                <h3 className="text-sm font-black text-white">Admin Authentication</h3>
+                <p className="text-[10px] text-amber-300 font-semibold">Master Rummy Management Console</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-stone-300 mb-3 leading-relaxed">
+              This area is restricted to authorized operations administrators. Verify your administrator credentials to proceed.
+            </p>
+
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                setIsVerifyingAdmin(true);
+                setAdminAuthError(null);
+                try {
+                  const res = await verifyAdminCredentials(adminEmail, adminKey);
+                  if (res.success) {
+                    sounds.playWinFanfare();
+                    await checkAdminPermissions();
+                    setShowAdminLoginModal(false);
+                    onClose();
+                    onOpenAdmin();
+                  } else {
+                    setAdminAuthError(res.error || 'Authentication failed');
+                  }
+                } catch (err: any) {
+                  setAdminAuthError(err.message || 'Verification error');
+                } finally {
+                  setIsVerifyingAdmin(false);
+                }
+              }}
+              className="space-y-3"
+            >
+              <div>
+                <label className="text-[10px] uppercase font-bold text-stone-400 tracking-wider block mb-1">
+                  Admin Email
+                </label>
+                <input
+                  type="email"
+                  value={adminEmail}
+                  onChange={(e) => setAdminEmail(e.target.value)}
+                  placeholder="admin@example.com"
+                  className="w-full bg-stone-950 border border-stone-700 rounded-xl px-3 py-2 text-xs text-stone-100 focus:outline-hidden focus:border-amber-400"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] uppercase font-bold text-stone-400 tracking-wider block mb-1">
+                  Admin Security Key
+                </label>
+                <input
+                  type="password"
+                  value={adminKey}
+                  onChange={(e) => setAdminKey(e.target.value)}
+                  placeholder="Enter admin key (e.g. MasterAdmin@2026)"
+                  className="w-full bg-stone-950 border border-stone-700 rounded-xl px-3 py-2 text-xs text-stone-100 focus:outline-hidden focus:border-amber-400 font-mono"
+                  required
+                />
+              </div>
+
+              {adminAuthError && (
+                <div className="p-2 rounded-lg bg-rose-950/60 border border-rose-500/50 text-rose-300 text-xs font-semibold">
+                  {adminAuthError}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={isVerifyingAdmin}
+                className="w-full py-2.5 bg-gradient-to-r from-amber-500 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 text-stone-950 font-black text-xs uppercase tracking-wider rounded-xl shadow-md active:scale-95 transition-all flex items-center justify-center gap-1.5"
+              >
+                <KeyRound className="w-3.5 h-3.5" />
+                <span>{isVerifyingAdmin ? 'VERIFYING PERMISSIONS...' : 'UNLOCK & ACCESS ADMIN'}</span>
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -14,6 +14,8 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   practice_chips BIGINT DEFAULT 10000 NOT NULL,
   total_matches INTEGER DEFAULT 0 NOT NULL,
   total_wins INTEGER DEFAULT 0 NOT NULL,
+  is_admin BOOLEAN DEFAULT FALSE NOT NULL,
+  role TEXT DEFAULT 'player' NOT NULL,
   created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
   updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
 );
@@ -22,13 +24,15 @@ CREATE TABLE IF NOT EXISTS public.profiles (
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
-  INSERT INTO public.profiles (id, username, phone, avatar, practice_chips)
+  INSERT INTO public.profiles (id, username, phone, avatar, practice_chips, is_admin, role)
   VALUES (
     new.id,
     COALESCE(new.raw_user_meta_data->>'username', 'Player_' || SUBSTRING(new.id::text, 1, 6)),
     COALESCE(new.raw_user_meta_data->>'phone', ''),
     COALESCE(new.raw_user_meta_data->>'avatar', 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&q=80'),
-    10000
+    10000,
+    CASE WHEN LOWER(new.email) IN ('ranidas784170@gmail.com', 'admin@masterrummy.com') THEN TRUE ELSE FALSE END,
+    CASE WHEN LOWER(new.email) IN ('ranidas784170@gmail.com', 'admin@masterrummy.com') THEN 'admin' ELSE 'player' END
   )
   ON CONFLICT (id) DO NOTHING;
   RETURN NEW;
