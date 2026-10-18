@@ -1,4 +1,4 @@
-import { PlayingCard, Rank, Suit } from '../types/rummy';
+import { PlayingCard, Rank, Suit, TossCardPlayer, TossResult } from '../types/rummy';
 
 export const SUITS: Suit[] = ['spades', 'hearts', 'clubs', 'diamonds'];
 export const RANKS: Rank[] = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
@@ -626,6 +626,7 @@ export function autoSortHand(cards: PlayingCard[], wildJokerRank: Rank): Playing
 export interface GameModeConfig {
   mode: 'Points' | 'Pool' | 'Deals';
   detail: string; // '101' | '201' | '2' | '3' | 'Classic'
+  handSize: number; // 13 cards for Indian Rummy
   firstDropPenalty: number;
   middleDropPenalty: number;
   maxPenalty: number;
@@ -642,6 +643,7 @@ export function getGameModeConfig(
     return {
       mode: 'Pool',
       detail: is201 ? '201' : '101',
+      handSize: 13,
       firstDropPenalty: is201 ? 25 : 20,
       middleDropPenalty: is201 ? 50 : 40,
       maxPenalty: 80,
@@ -654,6 +656,7 @@ export function getGameModeConfig(
     return {
       mode: 'Deals',
       detail: count.toString(),
+      handSize: 13,
       firstDropPenalty: 20,
       middleDropPenalty: 40,
       maxPenalty: 80,
@@ -665,6 +668,7 @@ export function getGameModeConfig(
   return {
     mode: 'Points',
     detail: detail || 'Classic',
+    handSize: 13,
     firstDropPenalty: 20,
     middleDropPenalty: 40,
     maxPenalty: 80,
@@ -1032,3 +1036,224 @@ export function moveMultipleCardsBetweenGroups(
 
   return { success: true, newGroups: cleanedGroups, message: 'Cards moved successfully' };
 }
+
+/**
+ * =========================================================================
+ * RUMMY TOSS & SEQUENTIAL CARD DEALING ENGINE
+ * =========================================================================
+ * 
+ * Standard Rummy Toss Rules:
+ * 1. Ace is highest: 14 pts. Followed by K(13), Q(12), J(11), 10..2.
+ * 2. Suit tie-breaker: Spades (4) > Hearts (3) > Clubs (2) > Diamonds (1).
+ * 3. Total score = rankScore * 10 + suitScore.
+ *    Every card in the standard deck is distinct, ensuring deterministic ranking.
+ * 4. Highest card player gets 1st turn. Lowest card player gets last turn.
+ * 5. Other players arranged in descending order between highest and lowest.
+ * 6. The lowest card player (or player preceding the 1st turn) is designated Dealer ('D').
+ * 7. Dealer deals cards sequentially: 1 card to each player per pass, following the toss order,
+ *    for 13 passes until everyone has 13 cards.
+ */
+
+export const TOSS_RANK_SCORE_MAP: Record<Rank, number> = {
+  'A': 14,
+  'K': 13,
+  'Q': 12,
+  'J': 11,
+  '10': 10,
+  '9': 9,
+  '8': 8,
+  '7': 7,
+  '6': 6,
+  '5': 5,
+  '4': 4,
+  '3': 3,
+  '2': 2,
+};
+
+export const TOSS_SUIT_SCORE_MAP: Record<Suit, number> = {
+  'spades': 4,
+  'hearts': 3,
+  'clubs': 2,
+  'diamonds': 1,
+};
+
+export function calculateTossScore(card: PlayingCard): {
+  rankScore: number;
+  suitScore: number;
+  totalScore: number;
+} {
+  const rankScore = TOSS_RANK_SCORE_MAP[card.rank] ?? 2;
+  const suitScore = TOSS_SUIT_SCORE_MAP[card.suit] ?? 1;
+  const totalScore = rankScore * 10 + suitScore;
+  return { rankScore, suitScore, totalScore };
+}
+
+/**
+ * Creates a clean, standard 52-card single deck without jokers for the Toss.
+ */
+export function createSingleTossDeck(): PlayingCard[] {
+  const deck: PlayingCard[] = [];
+  let id = 1;
+  for (const suit of SUITS) {
+    for (const rank of RANKS) {
+      deck.push({
+        id: `toss_${id++}_${suit}_${rank}`,
+        suit,
+        rank,
+        value: RANK_VALUE_MAP[rank],
+        points: RANK_POINTS_MAP[rank],
+      });
+    }
+  }
+  return shuffleCards(deck);
+}
+
+export interface SeatedPlayerInfo {
+  userId: string;
+  seatIndex: number;
+  playerName: string;
+  avatar: string;
+}
+
+/**
+ * Execute an official, deterministic Rummy Toss for any table size (2P, 6P, etc.).
+ * Guarantees distinct cards from a single shuffled deck with no duplicates.
+ */
+export function executeRummyToss(
+  players: SeatedPlayerInfo[],
+  roundNumber: number = 1,
+  customDeck?: PlayingCard[]
+): TossResult {
+  if (!players || players.length === 0) {
+    throw new Error('Cannot execute toss with 0 players');
+  }
+
+  // Shuffle a clean standard deck for toss
+  const tossDeck = customDeck ? [...customDeck] : createSingleTossDeck();
+
+  if (tossDeck.length < players.length) {
+    throw new Error('Not enough cards in deck for toss');
+  }
+
+  // Draw 1 distinct card per player
+  const evaluatedPlayers: Array<Omit<TossCardPlayer, 'turnOrder' | 'isWinner'>> = [];
+  const assignedCardIds = new Set<string>();
+
+  for (let i = 0; i < players.length; i++) {
+    const p = players[i];
+    const card = tossDeck[i];
+
+    if (assignedCardIds.has(card.id)) {
+      throw new Error(`Duplicate toss card detected: ${card.id}`);
+    }
+    assignedCardIds.add(card.id);
+
+    const scores = calculateTossScore(card);
+    evaluatedPlayers.push({
+      userId: p.userId,
+      seatIndex: p.seatIndex,
+      playerName: p.playerName,
+      avatar: p.avatar,
+      card,
+      rankScore: scores.rankScore,
+      suitScore: scores.suitScore,
+      totalScore: scores.totalScore,
+    });
+  }
+
+  // Sort descending by total score:
+  // Ace > K > Q > ... > 2. If equal rank, Spades > Hearts > Clubs > Diamonds.
+  const sorted = [...evaluatedPlayers].sort((a, b) => b.totalScore - a.totalScore);
+
+  const finalPlayers: TossCardPlayer[] = sorted.map((p, idx) => ({
+    ...p,
+    turnOrder: idx + 1, // 1st, 2nd, ..., Nth
+    isWinner: idx === 0,
+  }));
+
+  const winner = finalPlayers[0];
+  const lowest = finalPlayers[finalPlayers.length - 1];
+
+  // The lowest card player is the dealer ('D'), who deals to the 1st player
+  const dealerSeatIndex = lowest.seatIndex;
+
+  return {
+    round: roundNumber,
+    players: finalPlayers,
+    winnerUserId: winner.userId,
+    winnerSeatIndex: winner.seatIndex,
+    winnerName: winner.playerName,
+    firstTurnSeat: winner.seatIndex,
+    dealerSeatIndex,
+    suitTieBreakerRule: 'Spades > Hearts > Clubs > Diamonds',
+    completedAt: new Date().toISOString(),
+  };
+}
+
+export interface SequentialDealResult {
+  handsBySeat: Record<number, PlayingCard[]>;
+  dealSequence: Array<{
+    pass: number;
+    seatIndex: number;
+    userId: string;
+    card: PlayingCard;
+  }>;
+  firstDiscard: PlayingCard;
+  remainingDeck: PlayingCard[];
+}
+
+/**
+ * Sequential Dealer-Based Card Distribution:
+ * Deals 1 card per player per pass in the established toss turn order
+ * for exactly 13 passes (total 13 cards per player).
+ * Guarantees zero duplicate cards and full state synchronization.
+ */
+export function executeSequentialDeal(
+  deck: PlayingCard[],
+  tossResult: TossResult,
+  handSize: number = 13
+): SequentialDealResult {
+  const workingDeck = [...deck];
+  const turnOrderSeats = tossResult.players.map((p) => ({
+    seatIndex: p.seatIndex,
+    userId: p.userId,
+  }));
+
+  const handsBySeat: Record<number, PlayingCard[]> = {};
+  for (const p of tossResult.players) {
+    handsBySeat[p.seatIndex] = [];
+  }
+
+  const dealSequence: SequentialDealResult['dealSequence'] = [];
+
+  // Deal 1 card to each player per pass
+  for (let pass = 1; pass <= handSize; pass++) {
+    for (const player of turnOrderSeats) {
+      if (workingDeck.length === 0) {
+        throw new Error('Closed deck ran out of cards during sequential deal');
+      }
+      const card = workingDeck.shift()!;
+      handsBySeat[player.seatIndex].push(card);
+      dealSequence.push({
+        pass,
+        seatIndex: player.seatIndex,
+        userId: player.userId,
+        card,
+      });
+    }
+  }
+
+  // After all 13 cards are dealt to each player, reveal starting discard card
+  if (workingDeck.length === 0) {
+    throw new Error('No cards remaining for starting discard pile');
+  }
+  const firstDiscard = workingDeck.shift()!;
+
+  return {
+    handsBySeat,
+    dealSequence,
+    firstDiscard,
+    remainingDeck: workingDeck,
+  };
+}
+

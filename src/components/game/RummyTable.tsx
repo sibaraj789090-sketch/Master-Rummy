@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useRummy } from '../../context/RummyContext';
-import { PlayingCard, Rank, Suit } from '../../types/rummy';
+import { PlayingCard, Rank, Suit, TossResult, TossCardPlayer } from '../../types/rummy';
 import {
   createDeck,
   shuffleCards,
@@ -17,6 +17,8 @@ import {
   resolveDealsRound,
   moveCardBetweenGroups,
   moveMultipleCardsBetweenGroups,
+  executeRummyToss,
+  executeSequentialDeal,
   GameModeConfig,
   RANKS,
 } from '../../utils/rummyRules';
@@ -44,6 +46,8 @@ import {
   ArrowRight,
   Sparkles,
   Undo2,
+  ZoomOut,
+  ZoomIn,
 } from 'lucide-react';
 import { multiplayerService } from '../../services/multiplayerService';
 import { ScreenOrientation } from '@capacitor/screen-orientation';
@@ -78,25 +82,25 @@ const TWO_PLAYER_OPPONENT: SeatPlayer = {
   isDealer: false,
 };
 
-// 6-Player Table Opponents
+// 6-Player Table Opponents matching photo
 const SIX_PLAYER_OPPONENTS: SeatPlayer[] = [
   {
-    id: 'seat_sanjiv',
-    name: 'Sanjiv Sa',
-    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150&q=80',
+    id: 'seat_seraj',
+    name: 'Seraj Hus',
+    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
     chips: 3000,
     roundScore: 0,
     cumulativeScore: 0,
     dealScores: [],
-    status: 'PLAYING',
+    status: 'DROPPED',
     cardsCount: 13,
     turnsCount: 0,
     isDealer: false,
   },
   {
-    id: 'seat_mahmad',
-    name: 'Mahmad Ma',
-    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
+    id: 'seat_dk_singh',
+    name: 'DK Singh',
+    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150&q=80',
     chips: 4000,
     roundScore: 0,
     cumulativeScore: 0,
@@ -104,12 +108,12 @@ const SIX_PLAYER_OPPONENTS: SeatPlayer[] = [
     status: 'PLAYING',
     cardsCount: 13,
     turnsCount: 0,
-    isDealer: false,
+    isDealer: true,
   },
   {
-    id: 'seat_madhusuda',
-    name: 'Madhusuda',
-    avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=150&q=80',
+    id: 'seat_kaleem',
+    name: 'Kaleem Ud',
+    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150&q=80',
     chips: 3500,
     roundScore: 0,
     cumulativeScore: 0,
@@ -120,9 +124,9 @@ const SIX_PLAYER_OPPONENTS: SeatPlayer[] = [
     isDealer: false,
   },
   {
-    id: 'seat_ankit',
-    name: 'Ankit Awa',
-    avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&q=80',
+    id: 'seat_naseema',
+    name: 'Naseema S',
+    avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=150&q=80',
     chips: 4500,
     roundScore: 0,
     cumulativeScore: 0,
@@ -133,17 +137,17 @@ const SIX_PLAYER_OPPONENTS: SeatPlayer[] = [
     isDealer: false,
   },
   {
-    id: 'seat_sonelal',
-    name: 'Sonelal K',
-    avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=150&q=80',
-    chips: 4000,
+    id: 'seat_md_shahza',
+    name: 'Md Shahza',
+    avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&q=80',
+    chips: 5000,
     roundScore: 0,
     cumulativeScore: 0,
     dealScores: [],
     status: 'PLAYING',
     cardsCount: 13,
     turnsCount: 0,
-    isDealer: true,
+    isDealer: false,
   },
 ];
 
@@ -188,9 +192,9 @@ const CardBackArt: React.FC<{ className?: string }> = ({ className = 'w-full h-f
   <div className={`relative bg-gradient-to-br from-[#78350f] via-[#b45309] to-[#451a03] rounded-lg sm:rounded-xl border-2 border-amber-300/80 shadow-2xl flex flex-col items-center justify-center overflow-hidden ${className}`}>
     <div className="absolute inset-1 border border-amber-300/60 rounded sm:rounded-lg pointer-events-none" />
     <div className="absolute inset-2 border border-dashed border-amber-400/40 rounded sm:rounded-md pointer-events-none" />
-    <div className="relative w-8 h-10 sm:w-10 sm:h-13 border-2 border-amber-300/80 bg-amber-950/80 rounded-full flex flex-col items-center justify-center shadow-inner">
-      <span className="text-amber-300 text-sm sm:text-base font-black">♠</span>
-      <span className="text-[7px] text-amber-200 font-black tracking-widest mt-0.5">RUMMY</span>
+    <div className="relative w-9 h-12 sm:w-12 sm:h-16 border-2 border-amber-300/80 bg-amber-950/80 rounded-full flex flex-col items-center justify-center shadow-inner">
+      <span className="text-amber-300 text-base sm:text-lg font-black">♠</span>
+      <span className="text-[8px] sm:text-[9px] text-amber-200 font-black tracking-widest mt-0.5">RUMMY</span>
     </div>
   </div>
 );
@@ -227,10 +231,32 @@ export const RummyTable: React.FC = () => {
   const [isAutoRotating, setIsAutoRotating] = useState<boolean>(true);
   const [isFullWidth, setIsFullWidth] = useState<boolean>(false);
 
+  // Table Zoom Out Level (Default: 100% for full grand table scale matching photo)
+  const [tableZoomLevel, setTableZoomLevel] = useState<'84%' | '90%' | '100%'>('100%');
+
   // Countdown & Toss
-  const [countdown, setCountdown] = useState<number>(2);
+  const [countdown, setCountdown] = useState<number>(1);
   const [gameStarted, setGameStarted] = useState<boolean>(false);
   const [tossAnnouncement, setTossAnnouncement] = useState<string | null>(null);
+
+  // Professional Rummy Toss & Fast Sequential Dealing State
+  const [tossState, setTossState] = useState<{
+    phase: 'TOSS' | 'DEALING' | 'COMPLETE';
+    tossResult: TossResult | null;
+    passNumber: number;
+    activeDealingSeat: number | null;
+    bannerMessage: string | null;
+  }>({
+    phase: 'TOSS',
+    tossResult: null,
+    passNumber: 0,
+    activeDealingSeat: null,
+    bannerMessage: null,
+  });
+
+  const [isUserDealer, setIsUserDealer] = useState<boolean>(false);
+  const dealingIntervalRef = useRef<any>(null);
+  const tossTimeoutRef = useRef<any>(null);
 
   // Multi-Round / Multi-Deal Table Progression State
   const [currentRound, setCurrentRound] = useState<number>(1);
@@ -288,6 +314,21 @@ export const RummyTable: React.FC = () => {
   const [showDropConfirmModal, setShowDropConfirmModal] = useState<boolean>(false);
   const [playerChatBubble, setPlayerChatBubble] = useState<string | null>(null);
   const [invalidShowMessage, setInvalidShowMessage] = useState<string | null>(null);
+
+  // In-Game Sleek Toast Notification
+  const [tableToast, setTableToast] = useState<{
+    message: string;
+    type?: 'info' | 'warn' | 'success';
+  } | null>(null);
+  const toastTimeoutRef = useRef<any>(null);
+
+  const showTableToast = (message: string, type: 'info' | 'warn' | 'success' = 'info') => {
+    setTableToast({ message, type });
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    toastTimeoutRef.current = setTimeout(() => {
+      setTableToast(null);
+    }, 2800);
+  };
 
   // Round Complete Modal (for Pool and Deals progression)
   const [roundCompleteModalData, setRoundCompleteModalData] = useState<{
@@ -422,67 +463,178 @@ export const RummyTable: React.FC = () => {
     };
   }, []);
 
-  // Initialize Dealing Cards for a Round or Deal
+  // Cleanup timers on unmount
+  useEffect(() => {
+    return () => {
+      if (dealingIntervalRef.current) clearInterval(dealingIntervalRef.current);
+      if (tossTimeoutRef.current) clearTimeout(tossTimeoutRef.current);
+    };
+  }, []);
+
+  // Initialize Dealing Cards for a Round or Deal (Toss -> Fast Sequential Dealing)
   const initRoundDealing = (roundNum: number, dealNum: number) => {
+    // Clear any active timers
+    if (dealingIntervalRef.current) clearInterval(dealingIntervalRef.current);
+    if (tossTimeoutRef.current) clearTimeout(tossTimeoutRef.current);
+
     const is2P = playersMode === 2;
     const initialJokerRank: Rank = is2P ? '10' : '5';
     const initialJokerSuit: Suit = is2P ? 'diamonds' : 'spades';
     setWildJokerRank(initialJokerRank);
     setWildJokerSuit(initialJokerSuit);
 
-    // Create 2 shuffled decks
-    const deck = shuffleCards(createDeck(2, initialJokerRank));
-
-    // Deal 13 cards to player
-    const dealtPlayer = deck.splice(0, 13);
-    const sortedHand = autoSortHand(dealtPlayer, initialJokerRank);
-    setCardGroups(sortedHand);
-
-    // Top open discard card
-    const firstOpen: PlayingCard = is2P
-      ? { id: `disc_${Date.now()}_6s`, rank: '6', suit: 'spades', value: 6, points: 6 }
-      : { id: `disc_${Date.now()}_jh`, rank: 'J', suit: 'hearts', value: 11, points: 10, isJoker: true };
-
-    setOpenDiscardPile([firstOpen]);
-    setClosedDeck(deck);
+    // Initial table state: hands empty, discard empty, user actions locked
+    setCardGroups([]);
+    setOpenDiscardPile([]);
     setHasDrawnCard(false);
     setSelectedCards([]);
     setPlayerDropped(false);
     setUserTurnsInRound(0);
-    setCurrentTurnSeat(is2P ? 1 : 4);
     setTurnTimer(30);
 
-    // Reset non-eliminated bot statuses for this round
-    setSeats((prev) =>
-      prev.map((s) => ({
+    // List of active seated players
+    const activeOpponents = (is2P ? [TWO_PLAYER_OPPONENT] : SIX_PLAYER_OPPONENTS).filter(
+      (s) => s.status !== 'ELIMINATED'
+    );
+
+    const allSeated = [
+      {
+        userId: currentUser.id,
+        seatIndex: 0,
+        playerName: `${currentUser.username} (You)`,
+        avatar: currentUser.avatar,
+      },
+      ...activeOpponents.map((s, idx) => ({
+        userId: s.id,
+        seatIndex: idx + 1,
+        playerName: s.name,
+        avatar: s.avatar,
+      })),
+    ];
+
+    // 1. Determine Toss Result
+    const tossResult: TossResult =
+      isMultiplayer && multiplayerSession?.toss_result
+        ? multiplayerSession.toss_result
+        : executeRummyToss(allSeated, roundNum);
+
+    const isMeDealer = tossResult.dealerSeatIndex === 0;
+    setIsUserDealer(isMeDealer);
+
+    // Reset bot statuses and dealer badge for this round
+    setSeats((prev) => {
+      const baseList = is2P ? [TWO_PLAYER_OPPONENT] : SIX_PLAYER_OPPONENTS;
+      return baseList.map((s, idx) => ({
         ...s,
         roundScore: 0,
         turnsCount: 0,
+        cardsCount: 0,
+        isDealer: idx + 1 === tossResult.dealerSeatIndex,
         status: s.status === 'ELIMINATED' ? 'ELIMINATED' : 'PLAYING',
-      }))
-    );
+      }));
+    });
+
+    // 2. Create 2 shuffled decks for gameplay (108 cards)
+    const deck = shuffleCards(createDeck(2, initialJokerRank));
+    const dealResult = executeSequentialDeal(deck, tossResult, 13);
+    setClosedDeck(deck);
+
+    // 3. STEP 1: START TOSS PHASE
+    setTossState({
+      phase: 'TOSS',
+      tossResult,
+      passNumber: 0,
+      activeDealingSeat: null,
+      bannerMessage: `Toss Complete — First Turn: ${tossResult.winnerName}`,
+    });
+    sounds.playCardDeal();
+
+    // 4. STEP 2: TRANSITION TO FAST SEQUENTIAL CARD DEALING AFTER TOSS
+    tossTimeoutRef.current = setTimeout(() => {
+      const dealerPlayer = tossResult.players.find((p) => p.seatIndex === tossResult.dealerSeatIndex);
+      const dealerName = dealerPlayer ? dealerPlayer.playerName : 'Dealer';
+
+      setTossState({
+        phase: 'DEALING',
+        tossResult,
+        passNumber: 1,
+        activeDealingSeat: tossResult.players[0].seatIndex,
+        bannerMessage: `Dealer (${dealerName}) Dealing Cards...`,
+      });
+
+      const sequence = dealResult.dealSequence;
+      let seqIndex = 0;
+      const accumulatedUserCards: PlayingCard[] = [];
+
+      // Fast sequential card deals (every 42ms so total dealing takes ~1.1s for 2P and ~3.3s for 6P)
+      dealingIntervalRef.current = setInterval(() => {
+        if (seqIndex >= sequence.length) {
+          // All cards dealt to all players
+          if (dealingIntervalRef.current) clearInterval(dealingIntervalRef.current);
+
+          // Reveal first discard card on discard pile with sound
+          sounds.playCardClick();
+          setOpenDiscardPile([dealResult.firstDiscard]);
+          setClosedDeck(dealResult.remainingDeck);
+
+          // Auto-sort user's 13 cards into sequences and sets
+          const sorted = autoSortHand(accumulatedUserCards, initialJokerRank);
+          setCardGroups(sorted);
+
+          // Set first turn to toss winner!
+          setCurrentTurnSeat(tossResult.firstTurnSeat);
+          setTurnTimer(30);
+
+          setTossState({
+            phase: 'COMPLETE',
+            tossResult,
+            passNumber: 13,
+            activeDealingSeat: null,
+            bannerMessage: `Toss Complete — First Turn: ${tossResult.winnerName}`,
+          });
+
+          // Auto clear banner message after 3 seconds
+          setTimeout(() => {
+            setTossState((prev) => ({ ...prev, bannerMessage: null }));
+          }, 3000);
+
+          return;
+        }
+
+        const step = sequence[seqIndex];
+        seqIndex++;
+
+        sounds.playCardDeal();
+
+        setTossState((prev) => ({
+          ...prev,
+          passNumber: step.pass,
+          activeDealingSeat: step.seatIndex,
+        }));
+
+        if (step.seatIndex === 0) {
+          accumulatedUserCards.push(step.card);
+          // Progressively display dealt cards in player hand
+          setCardGroups([[...accumulatedUserCards]]);
+        } else {
+          // Increment opponent cards count
+          setSeats((prevSeats) =>
+            prevSeats.map((s, idx) =>
+              idx + 1 === step.seatIndex ? { ...s, cardsCount: (s.cardsCount || 0) + 1 } : s
+            )
+          );
+        }
+
+        // Decrement closed deck count
+        setClosedDeck((prev) => (prev.length > 0 ? prev.slice(1) : []));
+      }, 42);
+    }, 2000);
   };
 
   // Initial Deal on Mount
   useEffect(() => {
+    setGameStarted(true);
     initRoundDealing(1, 1);
-
-    const countTimer = setInterval(() => {
-      setCountdown((prev) => {
-        if (prev <= 1) {
-          clearInterval(countTimer);
-          setGameStarted(true);
-          sounds.playCardDeal();
-          const dealerName = playersMode === 2 ? 'You' : 'Sonelal K (D)';
-          setTossAnnouncement(`Toss: ${dealerName} is Dealer. Game Started!`);
-          setTimeout(() => setTossAnnouncement(null), 3000);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(countTimer);
   }, [playersMode]);
 
   // Celebratory confetti animation on game or round victory
@@ -500,7 +652,7 @@ export const RummyTable: React.FC = () => {
 
   // Turn Timer Loop (30s countdown)
   useEffect(() => {
-    if (!gameStarted || playerDropped || winModalData || roundCompleteModalData) return;
+    if (!gameStarted || tossState.phase !== 'COMPLETE' || playerDropped || winModalData || roundCompleteModalData) return;
 
     const timer = setInterval(() => {
       setTurnTimer((prev) => {
@@ -513,11 +665,11 @@ export const RummyTable: React.FC = () => {
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [gameStarted, currentTurnSeat, hasDrawnCard, playerDropped, winModalData, roundCompleteModalData, seats.length]);
+  }, [gameStarted, tossState.phase, currentTurnSeat, hasDrawnCard, playerDropped, winModalData, roundCompleteModalData, seats.length]);
 
   // Opponent Bot Turn Simulator
   useEffect(() => {
-    if (!gameStarted || currentTurnSeat === 0 || winModalData || roundCompleteModalData) return;
+    if (!gameStarted || tossState.phase !== 'COMPLETE' || currentTurnSeat === 0 || winModalData || roundCompleteModalData) return;
     if (isMultiplayer) return;
 
     const botIndex = currentTurnSeat - 1;
@@ -611,16 +763,17 @@ export const RummyTable: React.FC = () => {
 
   // Draw from Closed Deck (User Turn)
   const handleDrawClosed = async () => {
+    if (tossState.phase !== 'COMPLETE') return;
     if (currentTurnSeat !== 0) {
-      alert("Wait for your turn!");
+      showTableToast("Wait for your turn to draw!", "warn");
       return;
     }
     if (playerDropped || playerEliminated) {
-      alert("You cannot draw after dropping or being eliminated.");
+      showTableToast("You cannot draw after dropping or being eliminated.", "warn");
       return;
     }
     if (hasDrawnCard) {
-      alert("You have already drawn a card! Please discard one card.");
+      showTableToast("You have already drawn a card! Please discard one card.", "warn");
       return;
     }
 
@@ -642,16 +795,17 @@ export const RummyTable: React.FC = () => {
 
   // Draw from Open Discard Pile (User Turn)
   const handleDrawOpen = async () => {
+    if (tossState.phase !== 'COMPLETE') return;
     if (currentTurnSeat !== 0) {
-      alert("Wait for your turn!");
+      showTableToast("Wait for your turn to draw!", "warn");
       return;
     }
     if (playerDropped || playerEliminated) {
-      alert("You cannot draw after dropping or being eliminated.");
+      showTableToast("You cannot draw after dropping or being eliminated.", "warn");
       return;
     }
     if (hasDrawnCard) {
-      alert("You have already drawn a card! Please discard one card.");
+      showTableToast("You have already drawn a card! Please discard one card.", "warn");
       return;
     }
 
@@ -672,6 +826,7 @@ export const RummyTable: React.FC = () => {
 
   // Toggle selection of a card (tap to select or tap to deselect)
   const handleCardClick = (cardId: string, groupIdx: number) => {
+    if (tossState.phase !== 'COMPLETE') return;
     sounds.playCardClick();
     setSelectedCards((prev) => {
       const exists = prev.some((sc) => sc.cardId === cardId);
@@ -690,6 +845,7 @@ export const RummyTable: React.FC = () => {
     toGroupIdx: number,
     insertIndex?: number
   ) => {
+    if (tossState.phase !== 'COMPLETE') return false;
     if (fromGroupIdx === toGroupIdx && insertIndex === undefined) {
       return false;
     }
@@ -707,6 +863,7 @@ export const RummyTable: React.FC = () => {
 
   // Move all currently selected cards to destination group (or new group if toGroupIdx is -1)
   const executeSelectedCardsMove = (toGroupIdx: number) => {
+    if (tossState.phase !== 'COMPLETE') return false;
     if (selectedCards.length === 0) return false;
     const cardIds = selectedCards.map((sc) => sc.cardId);
     const res = moveMultipleCardsBetweenGroups(cardGroups, cardIds, toGroupIdx);
@@ -743,6 +900,7 @@ export const RummyTable: React.FC = () => {
     groupIdx: number,
     cardIdx: number
   ) => {
+    if (tossState.phase !== 'COMPLETE') return;
     if (e.touches.length !== 1) return;
     const touch = e.touches[0];
     setTouchDrag({
@@ -818,6 +976,7 @@ export const RummyTable: React.FC = () => {
     groupIdx: number,
     cardIdx: number
   ) => {
+    if (tossState.phase !== 'COMPLETE') return;
     e.dataTransfer.setData('text/plain', card.id);
     e.dataTransfer.effectAllowed = 'move';
     setHtml5DragCard({ card, fromGroupIdx: groupIdx, fromCardIdx: cardIdx });
@@ -841,16 +1000,17 @@ export const RummyTable: React.FC = () => {
 
   // Discard selected card
   const handleDiscard = async () => {
+    if (tossState.phase !== 'COMPLETE') return;
     if (currentTurnSeat !== 0) {
-      alert("Wait for your turn!");
+      showTableToast("Wait for your turn to discard!", "warn");
       return;
     }
     if (!hasDrawnCard) {
-      alert("Please draw a card from Closed Deck or Open Pile first!");
+      showTableToast("Please draw a card from Closed Deck or Open Pile first!", "warn");
       return;
     }
     if (selectedCards.length !== 1) {
-      alert("Select exactly 1 card to discard.");
+      showTableToast("Select exactly 1 card to discard.", "info");
       return;
     }
 
@@ -878,8 +1038,9 @@ export const RummyTable: React.FC = () => {
 
   // Group selected cards into a new meld group
   const handleGroupCards = () => {
+    if (tossState.phase !== 'COMPLETE') return;
     if (selectedCards.length < 2) {
-      alert("Select 2 or more cards to form a group.");
+      showTableToast("Select 2 or more cards to form a group.", "info");
       return;
     }
 
@@ -909,6 +1070,7 @@ export const RummyTable: React.FC = () => {
 
   // Auto-Sort Cards into valid Pure Sequences, Impure Sequences, Sets & Ungrouped
   const handleAutoSort = () => {
+    if (tossState.phase !== 'COMPLETE') return;
     sounds.playCardClick();
     const allCards = cardGroups.flat();
     if (allCards.length === 0) return;
@@ -920,9 +1082,10 @@ export const RummyTable: React.FC = () => {
 
   // Open Drop Confirmation
   const handleOpenDropConfirm = () => {
+    if (tossState.phase !== 'COMPLETE') return;
     if (playerDropped || playerEliminated) return;
     if (hasDrawnCard) {
-      alert("You cannot drop after drawing a card. You must discard to complete your turn.");
+      showTableToast("You cannot drop after drawing a card. You must discard to complete your turn.", "warn");
       return;
     }
     sounds.playCardClick();
@@ -1297,13 +1460,14 @@ export const RummyTable: React.FC = () => {
 
   // Declare / Show Hand
   const handleDeclareShow = () => {
+    if (tossState.phase !== 'COMPLETE') return;
     if (isDeclaring) return;
     if (currentTurnSeat !== 0) {
-      alert("You can only declare on your turn!");
+      showTableToast("You can only SHOW / declare on your turn!", "warn");
       return;
     }
     if (playerDropped || playerEliminated) {
-      alert("You cannot declare after dropping or being eliminated.");
+      showTableToast("You cannot SHOW / declare after dropping or being eliminated.", "warn");
       return;
     }
 
@@ -1473,45 +1637,32 @@ export const RummyTable: React.FC = () => {
         </div>
       )}
 
-      {/* 1. Sleek Full-Width In-Game Top Bar */}
-      <div className="w-full bg-[#0d121c]/95 border-b border-stone-800/80 px-2.5 sm:px-4 py-1.5 flex items-center justify-between text-xs z-30 shrink-0 shadow-md">
-        {/* Left Controls */}
-        <div className="flex items-center gap-1.5 sm:gap-2">
-          <button
-            onClick={() => {
-              sounds.playCardClick();
-              setShowInGameMenu(true);
-            }}
-            title="Menu"
-            className="w-8 h-8 rounded-lg bg-stone-800/90 hover:bg-stone-700 flex items-center justify-center text-stone-200 transition-colors active:scale-95 border border-stone-700/60"
-          >
-            <Menu className="w-4 h-4" />
-          </button>
+      {/* 1. Sleek In-Game Top Bar matching photo */}
+      <div className="w-full bg-[#0a0f18] px-3 sm:px-6 py-1.5 flex items-center justify-between text-xs z-30 shrink-0">
+        {/* Left: Circular Menu Button */}
+        <button
+          onClick={() => {
+            sounds.playCardClick();
+            setShowInGameMenu(true);
+          }}
+          title="Menu"
+          className="w-9 h-9 rounded-full bg-[#1e2533]/90 hover:bg-[#283244] text-white flex items-center justify-center border border-stone-600/60 shadow-lg active:scale-95 transition-all"
+        >
+          <Menu className="w-5 h-5" />
+        </button>
 
-          <button
-            onClick={() => {
-              sounds.playCardClick();
-              setShowScoreWindow(true);
-            }}
-            title="Score Window"
-            className="w-8 h-8 rounded-lg bg-stone-800/90 hover:bg-stone-700 flex items-center justify-center text-stone-200 transition-colors active:scale-95 border border-stone-700/60"
-          >
-            <FileText className="w-4 h-4" />
-          </button>
-        </div>
-
-        {/* Center: Verified Shield, Table ID, Game Variant, Stake & Signal */}
-        <div className="flex items-center gap-1.5 sm:gap-2.5 text-[11px] sm:text-xs font-semibold text-stone-300">
-          <div className="flex items-center gap-1">
-            <span className="w-4 h-4 rounded-full bg-emerald-600 text-white flex items-center justify-center text-[9px] font-black shadow-xs">
+        {/* Center: Sleek Dark Capsule with Shield, Table ID, Mode, Value, Signal */}
+        <div className="flex items-center gap-2.5 sm:gap-4 text-[11px] sm:text-xs font-semibold text-stone-300 bg-[#0f1724]/90 border border-stone-700/70 rounded-full px-5 py-1.5 shadow-inner">
+          <div className="flex items-center gap-1.5">
+            <span className="w-4 h-4 rounded-full bg-emerald-500 text-white flex items-center justify-center text-[10px] font-black shadow-xs">
               ✓
             </span>
-            <span className="font-mono text-stone-200 font-bold tracking-tight">{tableId}</span>
+            <span className="font-mono text-stone-200 font-bold tracking-tight">1137121062</span>
           </div>
 
           <span className="text-stone-600 font-normal">|</span>
 
-          <span className="text-amber-300 font-extrabold truncate max-w-[130px] sm:max-w-none">
+          <span className="text-stone-200 font-bold truncate max-w-[130px] sm:max-w-none">
             {getModeTitle()}
           </span>
 
@@ -1521,7 +1672,7 @@ export const RummyTable: React.FC = () => {
             Value: <span className="text-amber-400 font-mono">🪙 {gameVariant === 'Points' ? pointValue : entryFee}</span>
           </span>
 
-          {/* Cellular Signal Strength Icon (4 Bars) */}
+          {/* Cellular Signal Strength Icon in Green */}
           <div className="flex items-end gap-0.5 h-3 ml-1" title="Network: Excellent">
             <div className="w-0.5 h-1.5 bg-emerald-400 rounded-2xs" />
             <div className="w-0.5 h-2 bg-emerald-400 rounded-2xs" />
@@ -1530,52 +1681,163 @@ export const RummyTable: React.FC = () => {
           </div>
         </div>
 
-        {/* Right: Refresh / Orientation & Exit */}
-        <div className="flex items-center gap-1.5">
-          <button
-            onClick={handleToggleOrientation}
-            title={autoRotateLandscape ? 'Switch to Portrait' : 'Auto-Rotate to Landscape'}
-            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all active:scale-95 border ${
-              autoRotateLandscape
-                ? 'bg-amber-500 text-stone-950 border-amber-300 shadow-md ring-1 ring-amber-300'
-                : 'bg-stone-800/90 hover:bg-stone-700 text-stone-300 border-stone-700/60'
-            }`}
-          >
-            <RotateCw className={`w-4 h-4 transition-transform duration-300 ${autoRotateLandscape ? 'rotate-90' : ''}`} />
-          </button>
-
-          <button
-            onClick={handleExit}
-            title="Leave Table"
-            className="px-2.5 py-1 rounded-lg bg-red-900/60 hover:bg-red-800 text-red-100 text-xs font-extrabold border border-red-700/60 transition-colors shadow-xs"
-          >
-            Exit
-          </button>
-        </div>
+        {/* Right: Circular Rotate Button */}
+        <button
+          onClick={handleToggleOrientation}
+          title={autoRotateLandscape ? 'Switch to Portrait' : 'Auto-Rotate to Landscape'}
+          className="w-9 h-9 rounded-full bg-[#1e2533]/90 hover:bg-[#283244] text-white flex items-center justify-center border border-stone-600/60 shadow-lg active:scale-95 transition-all"
+        >
+          <RotateCw className={`w-4 h-4 transition-transform duration-300 ${autoRotateLandscape ? 'rotate-90' : ''}`} />
+        </button>
       </div>
 
-      {/* 2. Main Large Wide Oval Rummy Felt Table Arena */}
-      <div className="flex-1 w-full flex flex-col justify-between p-1 sm:p-2 md:p-3 overflow-hidden relative">
-        <div className="w-full h-full felt-table felt-wood-border rounded-[48px] sm:rounded-[76px] md:rounded-[110px] lg:rounded-[140px] flex flex-col justify-between p-1.5 sm:p-3 md:p-4 overflow-hidden relative shadow-[0_20px_50px_rgba(0,0,0,0.85)]">
-          {/* Countdown Overlay */}
-          {!gameStarted && (
-            <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-black/60 backdrop-blur-2xs">
-              <div className="bg-black/90 border-2 border-amber-400 px-6 py-4 rounded-2xl shadow-2xl text-center animate-bounce">
-                <span className="text-xs text-amber-300 uppercase tracking-widest font-black">
-                  {gameVariant.toUpperCase()} RUMMY ({playersMode} PLAYERS)
-                </span>
-                <h2 className="text-2xl font-black text-white mt-1 drop-shadow-lg tracking-wide">
-                  The game starts in <span className="text-yellow-400 text-3xl">{countdown}s</span>
-                </h2>
-                <p className="text-[11px] text-stone-300 mt-1">Dealing 13 cards to players...</p>
+      {/* 2. Main Large Wide Oval Rummy Felt Table Arena (Zoomed out for comfortable framing & breathing room on all tables) */}
+      <div className="flex-1 w-full flex items-center justify-center p-1 sm:p-2 md:p-3 overflow-hidden relative">
+        <div
+          className="w-[98%] sm:w-[96%] md:w-[95%] max-w-[1360px] h-[95%] sm:h-[94%] my-auto felt-table felt-wood-border rounded-[48px] sm:rounded-[72px] md:rounded-[96px] lg:rounded-[120px] flex flex-col justify-between p-1.5 sm:p-2.5 md:p-3.5 overflow-hidden relative shadow-[0_25px_60px_rgba(0,0,0,0.95)] transition-all"
+        >
+          {/* In-Game Sleek Toast Notification */}
+          {tableToast && (
+            <div className="absolute top-14 sm:top-18 left-1/2 -translate-x-1/2 z-50 animate-bounce pointer-events-none">
+              <div
+                className={`px-4 py-2 rounded-full shadow-2xl border-2 flex items-center gap-2 text-xs sm:text-sm font-black whitespace-nowrap ${
+                  tableToast.type === 'warn'
+                    ? 'bg-amber-500 text-stone-950 border-white ring-4 ring-amber-400/50'
+                    : tableToast.type === 'success'
+                    ? 'bg-emerald-500 text-white border-white ring-4 ring-emerald-400/50'
+                    : 'bg-slate-900/95 text-amber-300 border-amber-400/80 ring-2 ring-amber-400/30'
+                }`}
+              >
+                <span>{tableToast.type === 'warn' ? '⚠️' : tableToast.type === 'success' ? '🎉' : 'ℹ️'}</span>
+                <span>{tableToast.message}</span>
               </div>
             </div>
           )}
 
-          {/* Toss Announcement Pill Banner */}
-          {tossAnnouncement && (
-            <div className="absolute top-10 left-1/2 -translate-x-1/2 z-30 bg-amber-400 text-amber-950 font-black text-xs px-4 py-1.5 rounded-full shadow-xl border-2 border-white animate-pulse">
-              {tossAnnouncement}
+          {/* Toss Presentation Modal / Full Table Overlay */}
+          {tossState.phase === 'TOSS' && tossState.tossResult && (
+            <div className="absolute inset-0 z-40 bg-black/85 backdrop-blur-xs flex flex-col items-center justify-center p-3 animate-fade-in">
+              <div className="bg-gradient-to-r from-amber-600 via-yellow-500 to-amber-600 text-stone-950 font-black text-xs sm:text-sm px-5 py-1.5 rounded-full shadow-2xl border-2 border-white uppercase tracking-wider mb-2 animate-bounce">
+                🎲 Rummy Toss for First Turn & Dealer
+              </div>
+
+              <p className="text-[10px] sm:text-xs text-amber-200 font-semibold mb-3 text-center max-w-md">
+                Each seated player draws 1 card from a clean shuffled deck. Highest card gets 1st Turn (Ace is Highest). Suit tie-breaker: ♠ &gt; ♥ &gt; ♣ &gt; ♦. Lowest card deals.
+              </p>
+
+              {/* Toss Cards Grid */}
+              <div
+                className={`grid gap-2 sm:gap-3.5 max-w-4xl mx-auto w-full px-2 ${
+                  tossState.tossResult.players.length === 2
+                    ? 'grid-cols-2 max-w-sm'
+                    : 'grid-cols-3 sm:grid-cols-6'
+                }`}
+              >
+                {tossState.tossResult.players.map((tp) => {
+                  const isWinner = tp.isWinner;
+                  const isDealer = tp.seatIndex === tossState.tossResult?.dealerSeatIndex;
+                  const suitSymbol = getSuitSymbol(tp.card.suit);
+                  const suitColor = getSuitColor(tp.card.suit);
+
+                  return (
+                    <div
+                      key={tp.userId}
+                      className={`flex flex-col items-center rounded-2xl p-2 sm:p-2.5 border-2 transition-all ${
+                        isWinner
+                          ? 'bg-gradient-to-b from-amber-900/80 to-yellow-950/90 border-amber-400 ring-4 ring-yellow-400/80 shadow-[0_0_25px_rgba(250,204,21,0.8)] scale-105'
+                          : isDealer
+                          ? 'bg-stone-950/90 border-stone-600 ring-1 ring-amber-500/50'
+                          : 'bg-black/80 border-stone-700/80'
+                      }`}
+                    >
+                      <div className="relative w-8 h-8 sm:w-10 sm:h-10 rounded-full p-0.5 border border-amber-400/60 mb-1">
+                        <img
+                          src={tp.avatar}
+                          alt={tp.playerName}
+                          className="w-full h-full rounded-full object-cover bg-stone-900"
+                        />
+                        {isWinner && (
+                          <div className="absolute -top-2 -right-1 bg-amber-400 text-stone-950 text-[10px] w-4 h-4 rounded-full flex items-center justify-center font-black shadow-md">
+                            👑
+                          </div>
+                        )}
+                        {isDealer && (
+                          <div className="absolute -top-1 -left-1 bg-amber-500 text-stone-950 font-black text-[8px] w-3.5 h-3.5 rounded-full flex items-center justify-center border border-white">
+                            D
+                          </div>
+                        )}
+                      </div>
+
+                      <span className="text-[10px] sm:text-xs font-bold text-white truncate max-w-[80px] text-center mb-1">
+                        {tp.playerName}
+                      </span>
+
+                      {/* Face-up Toss Card (Enlarged) */}
+                      <div className="w-14 sm:w-16 md:w-18 h-20 sm:h-23 md:h-25 bg-white rounded-xl border-2 border-amber-300 shadow-2xl flex flex-col justify-between p-1.5 select-none">
+                        <div className="flex items-center justify-between">
+                          <span className={`text-sm sm:text-base font-black ${suitColor}`}>
+                            {tp.card.rank}
+                          </span>
+                          <span className={`text-xs sm:text-sm font-black ${suitColor}`}>
+                            {suitSymbol}
+                          </span>
+                        </div>
+                        <div className={`text-center text-xl sm:text-2xl font-black ${suitColor}`}>
+                          {suitSymbol}
+                        </div>
+                        <div className="text-[8px] text-stone-400 font-black tracking-wider text-right">
+                          TOSS
+                        </div>
+                      </div>
+
+                      {/* Turn Position Badge */}
+                      <div className="mt-1.5 text-center">
+                        <span
+                          className={`text-[8px] sm:text-[9px] font-black px-2 py-0.5 rounded-full uppercase border ${
+                            isWinner
+                              ? 'bg-amber-400 text-stone-950 border-white shadow-md'
+                              : isDealer
+                              ? 'bg-stone-800 text-amber-300 border-stone-600'
+                              : 'bg-stone-900 text-stone-300 border-stone-700'
+                          }`}
+                        >
+                          {tp.turnOrder === 1
+                            ? '1st Turn'
+                            : tp.turnOrder === 2
+                            ? '2nd Turn'
+                            : tp.turnOrder === 3
+                            ? '3rd Turn'
+                            : `${tp.turnOrder}th Turn`}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="mt-3.5 bg-emerald-950/90 border border-emerald-400 text-emerald-200 text-xs sm:text-sm font-black px-4 py-1.5 rounded-full shadow-lg flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-yellow-300 animate-spin" />
+                <span>Toss Complete — First Turn: {tossState.tossResult.winnerName}</span>
+              </div>
+            </div>
+          )}
+
+          {/* Sequential Dealing Status Badge */}
+          {tossState.phase === 'DEALING' && (
+            <div className="absolute top-10 left-1/2 -translate-x-1/2 z-30 bg-black/85 border border-amber-400/90 px-4 py-1.5 rounded-full shadow-2xl flex items-center gap-2 text-xs sm:text-sm text-amber-300 font-black animate-pulse">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping" />
+              <span>
+                Sequential Dealing (Pass {tossState.passNumber} of 13) ·{' '}
+                {tossState.tossResult?.players.find((p) => p.seatIndex === tossState.tossResult?.dealerSeatIndex)?.playerName || 'Dealer'} Deals
+              </span>
+            </div>
+          )}
+
+          {/* Toss Completion Banner */}
+          {tossState.phase === 'COMPLETE' && tossState.bannerMessage && (
+            <div className="absolute top-10 left-1/2 -translate-x-1/2 z-30 bg-gradient-to-r from-emerald-600 to-green-600 text-white font-black text-xs sm:text-sm px-5 py-1.5 rounded-full shadow-2xl border-2 border-white flex items-center gap-2 animate-bounce">
+              <Check className="w-4 h-4 text-yellow-300" />
+              <span>{tossState.bannerMessage}</span>
             </div>
           )}
 
@@ -1614,6 +1876,8 @@ export const RummyTable: React.FC = () => {
                   className={`relative w-13 h-13 sm:w-16 sm:h-16 md:w-18 md:h-18 rounded-full p-0.5 border-2 transition-all ${
                     seats[0]?.status === 'ELIMINATED'
                       ? 'border-red-600 opacity-60 grayscale'
+                      : tossState.phase === 'DEALING' && tossState.activeDealingSeat === 1
+                      ? 'border-yellow-400 ring-4 ring-yellow-400/90 shadow-[0_0_25px_rgba(250,204,21,0.95)] scale-110'
                       : currentTurnSeat === 1
                       ? 'border-emerald-300 ring-4 ring-emerald-400/90 shadow-[0_0_25px_rgba(52,211,153,0.95)] scale-105'
                       : 'border-emerald-500/80 ring-2 ring-emerald-400/40 shadow-[0_0_15px_rgba(16,185,129,0.5)]'
@@ -1630,6 +1894,12 @@ export const RummyTable: React.FC = () => {
                       <span className="text-[9px] font-black text-red-300 uppercase">OUT</span>
                     </div>
                   )}
+
+                  {seats[0]?.isDealer && (
+                    <div className="absolute -left-1 top-0 bg-amber-400 text-amber-950 font-black text-[9px] w-4 h-4 rounded-full flex items-center justify-center border border-white shadow-md z-20">
+                      D
+                    </div>
+                  )}
                 </div>
 
                 {/* Opponent Name Pill */}
@@ -1643,6 +1913,14 @@ export const RummyTable: React.FC = () => {
                     </span>
                   )}
                 </div>
+
+                {/* Face-down cards indicator (cards remain face-down) */}
+                <div className="flex items-center gap-1 bg-black/80 px-2.5 py-0.5 rounded-full border border-stone-700 mt-1 shadow-sm">
+                  <span className="text-amber-400 text-[10px]">🂠</span>
+                  <span className="text-[10px] font-mono font-bold text-amber-300">
+                    {tossState.phase === 'DEALING' ? (seats[0]?.cardsCount || 0) : 13} cards
+                  </span>
+                </div>
               </div>
             </div>
           ) : (
@@ -1651,6 +1929,7 @@ export const RummyTable: React.FC = () => {
               {seats.map((seat, idx) => {
                 const seatTurnIndex = idx + 1;
                 const isThisBotTurn = currentTurnSeat === seatTurnIndex;
+                const isReceivingCard = tossState.phase === 'DEALING' && tossState.activeDealingSeat === seatTurnIndex;
 
                 return (
                   <div key={seat.id} className="flex flex-col items-center relative">
@@ -1675,6 +1954,8 @@ export const RummyTable: React.FC = () => {
                       className={`relative w-10 h-10 sm:w-12 sm:h-12 md:w-14 md:h-14 rounded-full p-0.5 border-2 transition-all ${
                         seat.status === 'ELIMINATED'
                           ? 'border-red-600 opacity-60 grayscale'
+                          : isReceivingCard
+                          ? 'border-yellow-400 ring-4 ring-yellow-400/90 shadow-[0_0_20px_rgba(250,204,21,0.95)] scale-110'
                           : isThisBotTurn
                           ? 'border-emerald-300 ring-4 ring-emerald-400/90 shadow-[0_0_18px_rgba(52,211,153,0.9)] scale-105'
                           : 'border-emerald-500/60 ring-1 ring-emerald-400/30'
@@ -1694,7 +1975,7 @@ export const RummyTable: React.FC = () => {
                       )}
 
                       {seat.isDealer && (
-                        <div className="absolute -left-1 top-0 bg-amber-400 text-amber-950 font-black text-[8px] w-3.5 h-3.5 rounded-full flex items-center justify-center border border-white shadow-md">
+                        <div className="absolute -left-1 top-0 bg-amber-400 text-amber-950 font-black text-[8px] w-3.5 h-3.5 rounded-full flex items-center justify-center border border-white shadow-md z-20">
                           D
                         </div>
                       )}
@@ -1708,28 +1989,36 @@ export const RummyTable: React.FC = () => {
                         {seat.cumulativeScore} pts
                       </span>
                     )}
+
+                    {/* Face-down cards indicator */}
+                    <div className="flex items-center gap-0.5 bg-black/80 px-1.5 py-0.2 rounded-full border border-stone-700/80 mt-0.5 shadow-sm">
+                      <span className="text-[8px] text-amber-400">🂠</span>
+                      <span className="text-[8px] font-mono font-bold text-amber-300">
+                        {tossState.phase === 'DEALING' ? (seat.cardsCount || 0) : 13}
+                      </span>
+                    </div>
                   </div>
                 );
               })}
             </div>
           )}
 
-          {/* 3. CENTER TABLE: Wild Joker + Closed Deck + Finish Slot + Open Discard Pile */}
-          <div className="my-auto flex items-center justify-center gap-4 sm:gap-7 md:gap-10 z-20 relative py-1">
+          {/* 3. CENTER TABLE: Wild Joker + Closed Deck + Finish Slot + Open Discard Pile (Enlarged Card Sizes) */}
+          <div className="my-auto flex items-center justify-center gap-6 sm:gap-10 md:gap-14 z-20 relative py-1">
             {/* Left: Wild Joker + Closed Deck */}
             <div className="relative flex items-center">
               {/* Sideways Wild Joker Card */}
-              <div className="w-13 sm:w-15 md:w-18 h-18 sm:h-22 md:h-26 bg-white rounded-lg sm:rounded-xl border-2 border-amber-400 shadow-2xl -rotate-90 transform -mr-6 sm:-mr-8 z-10 flex flex-col justify-between p-1 sm:p-1.5">
-                <div className="flex items-center justify-between text-xs sm:text-sm font-black">
+              <div className="w-18 sm:w-22 md:w-26 lg:w-28 h-26 sm:h-32 md:h-38 lg:h-42 bg-white rounded-xl border-2 border-amber-400 shadow-2xl -rotate-90 transform -mr-9 sm:-mr-12 md:-mr-14 z-10 flex flex-col justify-between p-1.5 sm:p-2 select-none">
+                <div className="flex items-center justify-between text-sm sm:text-base md:text-lg font-black">
                   <span className={getSuitColor(wildJokerSuit)}>{wildJokerRank}</span>
-                  <span className="text-amber-600 text-xs">🃏</span>
+                  <span className="text-amber-600 text-sm sm:text-base">🃏</span>
                 </div>
-                <div className="text-center font-black text-lg sm:text-xl">
+                <div className="text-center font-black text-2xl sm:text-3xl md:text-4xl">
                   <span className={getSuitColor(wildJokerSuit)}>
                     {getSuitSymbol(wildJokerSuit)}
                   </span>
                 </div>
-                <div className="flex justify-end text-[8px] sm:text-[9px] text-amber-700 font-black tracking-wider">
+                <div className="flex justify-end text-[9px] sm:text-[10px] text-amber-700 font-black tracking-wider">
                   JOKER
                 </div>
               </div>
@@ -1738,41 +2027,41 @@ export const RummyTable: React.FC = () => {
               <div
                 onClick={handleDrawClosed}
                 title="Tap to draw from Closed Deck"
-                className={`relative w-13 sm:w-15 md:w-18 h-18 sm:h-22 md:h-26 cursor-pointer hover:scale-105 active:scale-95 transition-all z-20 ${
+                className={`relative w-20 sm:w-24 md:w-28 lg:w-30 h-28 sm:h-34 md:h-40 lg:h-44 cursor-pointer hover:scale-105 active:scale-95 transition-all z-20 ${
                   currentTurnSeat === 0 && !hasDrawnCard && !playerDropped && !playerEliminated
-                    ? 'ring-4 ring-yellow-400 shadow-[0_0_25px_rgba(250,204,21,0.95)] animate-pulse'
+                    ? 'ring-4 ring-yellow-400 shadow-[0_0_28px_rgba(250,204,21,0.95)] animate-pulse'
                     : 'shadow-2xl'
                 }`}
               >
                 <CardBackArt />
-                <span className="absolute -bottom-2.5 left-1/2 -translate-x-1/2 bg-black/85 text-amber-300 font-mono text-[9px] sm:text-[10px] px-2 py-0.5 rounded-full border border-amber-400/50 shadow-md">
-                  {closedDeck.length}
+                <span className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-black/90 text-amber-300 font-mono text-[10px] sm:text-xs px-2.5 py-0.5 rounded-full border border-amber-400/60 shadow-md font-bold whitespace-nowrap">
+                  {closedDeck.length} cards
                 </span>
               </div>
             </div>
 
-            {/* Middle: FINISH SLOT (Declare) */}
+            {/* Middle: FINISH / SHOW SLOT (Declare) */}
             <div
               onClick={() => {
                 if (currentTurnSeat === 0 && selectedCards.length === 1) {
                   handleDeclareShow();
                 } else {
-                  alert('Select 1 card and tap Finish Slot to DECLARE!');
+                  showTableToast('Select 1 card and tap Finish Slot to DECLARE / SHOW!', 'info');
                 }
               }}
-              title="Finish Slot (Select 1 card to Declare)"
-              className={`w-13 sm:w-15 md:w-18 h-18 sm:h-22 md:h-26 rounded-xl sm:rounded-2xl border-2 border-emerald-500/70 bg-emerald-950/60 flex flex-col items-center justify-center text-center cursor-pointer hover:bg-emerald-900/60 hover:border-emerald-300 transition-all p-1 shadow-inner ${
-                selectedCards.length === 1 && currentTurnSeat === 0 ? 'ring-3 ring-amber-400 animate-pulse' : ''
+              title="Finish Slot (Select 1 card to Declare / SHOW)"
+              className={`w-20 sm:w-24 md:w-28 lg:w-30 h-28 sm:h-34 md:h-40 lg:h-44 rounded-2xl border-2 border-emerald-500/80 bg-gradient-to-b from-emerald-950/80 to-emerald-900/90 flex flex-col items-center justify-center text-center cursor-pointer hover:bg-emerald-900/80 hover:border-emerald-300 transition-all p-1.5 shadow-[inset_0_2px_10px_rgba(0,0,0,0.6)] ${
+                selectedCards.length === 1 && currentTurnSeat === 0 ? 'ring-4 ring-amber-400 ring-offset-2 ring-offset-emerald-950 animate-pulse scale-105' : ''
               }`}
             >
-              <span className="text-[10px] sm:text-xs md:text-sm font-black text-emerald-400 tracking-wider">
+              <span className="text-xs sm:text-sm md:text-base font-black text-emerald-400 tracking-wider">
                 FINISH
               </span>
-              <span className="text-[10px] sm:text-xs md:text-sm font-black text-emerald-400 tracking-wider">
-                SLOT
-              </span>
-              <span className="text-[8px] sm:text-[9px] text-emerald-300/80 font-bold mt-0.5">
+              <span className="text-sm sm:text-base md:text-lg font-black text-amber-300 tracking-wider">
                 SHOW
+              </span>
+              <span className="text-[9px] sm:text-[10px] text-emerald-200 font-extrabold mt-1 bg-emerald-800/80 px-2 py-0.5 rounded-full border border-emerald-400/50 shadow-xs">
+                DECLARE
               </span>
             </div>
 
@@ -1782,32 +2071,32 @@ export const RummyTable: React.FC = () => {
                 <div
                   onClick={handleDrawOpen}
                   title="Draw from Open Discard Pile"
-                  className={`w-13 sm:w-15 md:w-18 h-18 sm:h-22 md:h-26 bg-white rounded-lg sm:rounded-xl border border-slate-300 shadow-2xl flex flex-col justify-between p-1 sm:p-1.5 cursor-pointer hover:scale-105 active:scale-95 transition-all z-10 ${
+                  className={`w-20 sm:w-24 md:w-28 lg:w-30 h-28 sm:h-34 md:h-40 lg:h-44 bg-white rounded-xl border-2 border-slate-300 shadow-2xl flex flex-col justify-between p-1.5 sm:p-2 cursor-pointer hover:scale-105 active:scale-95 transition-all z-10 select-none ${
                     currentTurnSeat === 0 && !hasDrawnCard && !playerDropped && !playerEliminated
-                      ? 'ring-3 ring-emerald-400'
+                      ? 'ring-4 ring-emerald-400 shadow-[0_0_25px_rgba(52,211,153,0.9)] animate-pulse'
                       : ''
                   }`}
                 >
                   <div className="flex items-center justify-between">
                     <span
-                      className={`text-sm sm:text-base font-black ${getSuitColor(openDiscardPile[0].suit)}`}
+                      className={`text-lg sm:text-xl md:text-2xl font-black ${getSuitColor(openDiscardPile[0].suit)}`}
                     >
                       {openDiscardPile[0].rank}
                     </span>
                     <span
-                      className={`text-xs sm:text-sm font-black ${getSuitColor(openDiscardPile[0].suit)}`}
+                      className={`text-base sm:text-lg md:text-xl font-black ${getSuitColor(openDiscardPile[0].suit)}`}
                     >
                       {getSuitSymbol(openDiscardPile[0].suit)}
                     </span>
                   </div>
 
-                  <div className="text-center text-xl sm:text-2xl font-black">
+                  <div className="text-center text-3xl sm:text-4xl md:text-5xl font-black leading-none">
                     <span className={getSuitColor(openDiscardPile[0].suit)}>
                       {getSuitSymbol(openDiscardPile[0].suit)}
                     </span>
                   </div>
 
-                  <div className="flex items-center justify-between text-[8px] text-slate-400 font-bold">
+                  <div className="flex items-center justify-between text-[10px] text-slate-500 font-bold">
                     <span>DISCARD</span>
                     {openDiscardPile[0].rank === wildJokerRank && (
                       <span className="text-amber-600 font-black">🃏</span>
@@ -1815,7 +2104,7 @@ export const RummyTable: React.FC = () => {
                   </div>
                 </div>
               ) : (
-                <div className="w-13 sm:w-15 md:w-18 h-18 sm:h-22 md:h-26 rounded-lg sm:rounded-xl border-2 border-dashed border-stone-600/70 flex items-center justify-center text-xs text-stone-500 font-bold">
+                <div className="w-20 sm:w-24 md:w-28 lg:w-30 h-28 sm:h-34 md:h-40 lg:h-44 rounded-xl border-2 border-dashed border-stone-600/70 flex items-center justify-center text-xs text-stone-500 font-bold">
                   EMPTY
                 </div>
               )}
@@ -1892,8 +2181,8 @@ export const RummyTable: React.FC = () => {
                       </button>
                     )}
 
-                    {/* Cards in this meld group with readable overlap */}
-                    <div className="flex -space-x-7 sm:-space-x-9 md:-space-x-11 lg:-space-x-12">
+                    {/* Cards in this meld group with readable overlap (Enlarged Card Size) */}
+                    <div className="flex -space-x-8 sm:-space-x-10 md:-space-x-12 lg:-space-x-14">
                       {group.map((card, cardIdx) => {
                         const isWild = card.rank === wildJokerRank;
                         const isSelected = isCardSelected(card.id);
@@ -1908,14 +2197,14 @@ export const RummyTable: React.FC = () => {
                             : 'text-slate-900';
                         const suitSymbol = getSuitSymbol(card.suit);
 
-                        const cardClassName = `w-[52px] sm:w-[62px] md:w-[72px] lg:w-[82px] h-[78px] sm:h-[94px] md:h-[108px] lg:h-[122px] shrink-0 rounded-lg sm:rounded-xl cursor-grab active:cursor-grabbing transition-all duration-150 flex select-none relative ${
+                        const cardClassName = `w-[66px] sm:w-[78px] md:w-[90px] lg:w-[102px] h-[98px] sm:h-[116px] md:h-[134px] lg:h-[150px] shrink-0 rounded-lg sm:rounded-xl cursor-grab active:cursor-grabbing transition-all duration-150 flex select-none relative ${
                           isSelected
-                            ? 'transform -translate-y-4 sm:-translate-y-5 ring-3 ring-amber-400 shadow-2xl z-30'
-                            : 'hover:-translate-y-1.5 z-10'
+                            ? 'transform -translate-y-5 sm:-translate-y-7 ring-4 ring-amber-400 shadow-2xl z-30'
+                            : 'hover:-translate-y-2 z-10'
                         } ${
                           isPrintedJoker
-                            ? 'bg-[#fef9c3] border-2 border-amber-400 justify-between p-1 sm:p-1.5 shadow-lg'
-                            : `bg-white border border-slate-300 flex-col justify-between p-1 sm:p-1.5 shadow-lg ${
+                            ? 'bg-[#fef9c3] border-2 border-amber-400 justify-between p-1.5 shadow-lg'
+                            : `bg-white border border-slate-300 flex-col justify-between p-1.5 shadow-lg ${
                                 isWild ? 'ring-2 ring-amber-400/90 bg-amber-50/95' : ''
                               }`
                         }`;
@@ -1937,7 +2226,7 @@ export const RummyTable: React.FC = () => {
                               }}
                               className={cardClassName}
                             >
-                              <div className="flex flex-col justify-around items-center text-red-600 font-black text-[9px] sm:text-[11px] md:text-xs leading-none">
+                              <div className="flex flex-col justify-around items-center text-red-600 font-black text-[10px] sm:text-xs md:text-sm leading-none">
                                 <span>J</span>
                                 <span>O</span>
                                 <span>K</span>
@@ -1945,7 +2234,7 @@ export const RummyTable: React.FC = () => {
                                 <span>R</span>
                               </div>
                               <div className="flex-1 flex items-center justify-center p-0.5">
-                                <JokerClownArt className="w-full h-full max-w-[44px] max-h-[44px] sm:max-w-[54px] sm:max-h-[54px]" />
+                                <JokerClownArt className="w-full h-full max-w-[48px] max-h-[48px] sm:max-w-[58px] sm:max-h-[58px]" />
                               </div>
                             </div>
                           );
@@ -1970,40 +2259,40 @@ export const RummyTable: React.FC = () => {
                             {/* Top Left: Rank and Suit */}
                             <div className="flex flex-col items-start leading-none">
                               <span
-                                className={`text-base sm:text-lg md:text-xl font-black ${suitColor}`}
+                                className={`text-lg sm:text-xl md:text-2xl font-black ${suitColor}`}
                               >
                                 {card.rank}
                               </span>
                               <span
-                                className={`text-xs sm:text-sm md:text-base font-black ${suitColor} -mt-0.5`}
+                                className={`text-sm sm:text-base md:text-lg font-black ${suitColor} -mt-0.5`}
                               >
                                 {suitSymbol}
                               </span>
                             </div>
 
                             {/* Center Large Suit Symbol */}
-                            <div className="text-center font-black text-xl sm:text-2xl md:text-3xl leading-none">
+                            <div className="text-center font-black text-2xl sm:text-3xl md:text-4xl leading-none">
                               <span className={`${suitColor} opacity-90`}>
                                 {suitSymbol}
                               </span>
                             </div>
 
                             {/* Bottom Corner */}
-                            <div className="flex items-center justify-between text-[8px] sm:text-[9px] leading-none">
+                            <div className="flex items-center justify-between text-[9px] sm:text-[10px] leading-none">
                               {isWild ? (
-                                <span className="bg-amber-400 text-amber-950 font-black px-1 rounded-xs text-[7px] sm:text-[8px] flex items-center gap-0.5 shadow-xs">
+                                <span className="bg-amber-400 text-amber-950 font-black px-1.5 py-0.5 rounded-xs text-[8px] sm:text-[9px] flex items-center gap-0.5 shadow-xs">
                                   <span>🃏</span>
                                   <span>WILD</span>
                                 </span>
                               ) : (
-                                <span className="text-slate-400 font-mono">
+                                <span className="text-slate-500 font-mono font-bold text-[9px] sm:text-[11px]">
                                   {card.points}
                                 </span>
                               )}
 
                               {isLastInGroup && (
                                 <span
-                                  className={`text-[10px] sm:text-xs font-black ${suitColor} -scale-100`}
+                                  className={`text-xs sm:text-sm font-black ${suitColor} -scale-100`}
                                 >
                                   {suitSymbol}
                                 </span>
@@ -2042,14 +2331,14 @@ export const RummyTable: React.FC = () => {
                   onDragLeave={() => setHtml5HoverGroupIdx(null)}
                   onDrop={(e) => handleHtml5DropGroup(e, -1)}
                   onClick={() => executeSelectedCardsMove(-1)}
-                  className={`w-14 sm:w-16 h-20 sm:h-24 rounded-2xl border-2 border-dashed flex flex-col items-center justify-center text-center p-1 transition-all cursor-pointer select-none shrink-0 ${
+                  className={`w-16 sm:w-20 h-24 sm:h-28 rounded-2xl border-2 border-dashed flex flex-col items-center justify-center text-center p-1 transition-all cursor-pointer select-none shrink-0 ${
                     touchDrag?.hoverGroupIdx === -1 || html5HoverGroupIdx === -1
                       ? 'border-amber-400 bg-amber-500/20 text-amber-300 ring-2 ring-amber-400 scale-105'
                       : 'border-stone-500/60 bg-black/20 text-stone-400 hover:border-amber-400 hover:text-amber-300'
                   }`}
                 >
-                  <span className="text-base sm:text-lg font-black leading-none">+</span>
-                  <span className="text-[8px] sm:text-[9px] font-black uppercase tracking-wider mt-0.5">
+                  <span className="text-lg sm:text-xl font-black leading-none">+</span>
+                  <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-wider mt-0.5">
                     New Group
                   </span>
                 </div>
@@ -2104,7 +2393,7 @@ export const RummyTable: React.FC = () => {
 
               {/* User Avatar with Dealer Badge and Turn Timer */}
               <div className="relative">
-                {playersMode === 2 && (
+                {isUserDealer && (
                   <div className="absolute -left-1.5 top-0 bg-amber-400 text-amber-950 font-black text-[9px] w-4 h-4 rounded-full flex items-center justify-center border border-white shadow-md z-20">
                     D
                   </div>
@@ -2114,6 +2403,8 @@ export const RummyTable: React.FC = () => {
                   className={`w-11 h-11 sm:w-13 sm:h-13 rounded-full p-0.5 border-2 transition-all ${
                     playerEliminated
                       ? 'border-red-600 opacity-60 grayscale'
+                      : tossState.phase === 'DEALING' && tossState.activeDealingSeat === 0
+                      ? 'border-yellow-400 ring-4 ring-yellow-400/90 shadow-[0_0_20px_rgba(250,204,21,0.95)] scale-110'
                       : currentTurnSeat === 0 && !playerDropped
                       ? 'border-emerald-400 ring-4 ring-emerald-400/90 shadow-[0_0_18px_rgba(52,211,153,0.9)] scale-105'
                       : 'border-stone-700'
@@ -2166,14 +2457,19 @@ export const RummyTable: React.FC = () => {
               </div>
             </div>
 
-            {/* Right: Action Buttons (UNDO / DESELECT / GROUP / DISCARD / DROP / AUTO SORT) */}
+            {/* Right: Action Buttons (UNDO / DESELECT / GROUP / DISCARD / SHOW / DROP / AUTO SORT) */}
             <div className="flex items-center gap-1.5 sm:gap-2">
               {/* Undo Move Button */}
               {moveHistory.length > 0 && (
                 <button
                   onClick={handleUndoMove}
+                  disabled={tossState.phase !== 'COMPLETE'}
                   title="Undo last card move"
-                  className="bg-stone-800 hover:bg-stone-700 text-amber-300 font-black text-xs sm:text-sm px-2.5 sm:px-3 py-2 rounded-xl shadow-md border border-stone-600 flex items-center gap-1 active:scale-95 transition-all"
+                  className={`font-black text-xs sm:text-sm px-2.5 sm:px-3 py-2 rounded-xl shadow-md border flex items-center gap-1 active:scale-95 transition-all ${
+                    tossState.phase !== 'COMPLETE'
+                      ? 'bg-stone-800/40 text-stone-500 border-stone-700 opacity-50 cursor-not-allowed'
+                      : 'bg-stone-800 hover:bg-stone-700 text-amber-300 border-stone-600'
+                  }`}
                 >
                   <Undo2 className="w-3.5 h-3.5 text-amber-400" />
                   <span className="hidden sm:inline">UNDO</span>
@@ -2195,7 +2491,12 @@ export const RummyTable: React.FC = () => {
               {selectedCards.length >= 2 && (
                 <button
                   onClick={handleGroupCards}
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs sm:text-sm px-3.5 py-2 rounded-xl shadow-lg uppercase active:scale-95 transition-all border border-emerald-400/50"
+                  disabled={tossState.phase !== 'COMPLETE'}
+                  className={`font-black text-xs sm:text-sm px-3.5 py-2 rounded-xl shadow-lg uppercase active:scale-95 transition-all border ${
+                    tossState.phase !== 'COMPLETE'
+                      ? 'bg-emerald-950/60 text-emerald-600 border-emerald-900 opacity-50 cursor-not-allowed'
+                      : 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-400/50'
+                  }`}
                 >
                   GROUP
                 </button>
@@ -2206,7 +2507,8 @@ export const RummyTable: React.FC = () => {
                 currentTurnSeat === 0 &&
                 hasDrawnCard &&
                 !playerDropped &&
-                !playerEliminated && (
+                !playerEliminated &&
+                tossState.phase === 'COMPLETE' && (
                   <button
                     onClick={handleDiscard}
                     className="bg-amber-500 hover:bg-amber-400 text-stone-950 font-black text-xs sm:text-sm px-3.5 py-2 rounded-xl shadow-lg uppercase active:scale-95 transition-all animate-pulse border border-amber-300"
@@ -2215,12 +2517,51 @@ export const RummyTable: React.FC = () => {
                   </button>
                 )}
 
+              {/* SHOW (Declare Hand to Win) Button on every table */}
+              <button
+                onClick={() => {
+                  if (tossState.phase !== 'COMPLETE') return;
+                  if (playerDropped || playerEliminated) {
+                    alert("You cannot SHOW after dropping or being eliminated.");
+                    return;
+                  }
+                  if (currentTurnSeat !== 0) {
+                    alert("Wait for your turn to SHOW / Declare!");
+                    return;
+                  }
+                  if (!hasDrawnCard) {
+                    alert("Please draw a 14th card before SHOW / Declaring!");
+                    return;
+                  }
+                  if (selectedCards.length !== 1) {
+                    alert("Select exactly 1 finish card to discard and tap SHOW to Declare!");
+                    return;
+                  }
+                  sounds.playWinFanfare();
+                  handleDeclareShow();
+                }}
+                disabled={tossState.phase !== 'COMPLETE' || playerDropped || playerEliminated}
+                title="SHOW (Declare your 13-card hand to win)"
+                className={`font-black text-xs sm:text-sm px-3.5 sm:px-4 py-2 rounded-xl shadow-lg uppercase active:scale-95 transition-all flex items-center gap-1.5 border ${
+                  tossState.phase !== 'COMPLETE' || playerDropped || playerEliminated
+                    ? 'bg-amber-950/40 text-amber-500/40 border-stone-800 opacity-50 cursor-not-allowed'
+                    : currentTurnSeat === 0 && hasDrawnCard && selectedCards.length === 1
+                    ? 'bg-gradient-to-r from-yellow-400 via-amber-300 to-yellow-400 text-stone-950 border-white ring-4 ring-yellow-400/90 shadow-[0_0_22px_rgba(250,204,21,0.95)] animate-pulse scale-105'
+                    : currentTurnSeat === 0 && hasDrawnCard
+                    ? 'bg-gradient-to-r from-amber-500 to-yellow-500 text-stone-950 border-amber-300 ring-2 ring-yellow-400/60'
+                    : 'bg-stone-800 hover:bg-stone-700 text-amber-300 border-stone-600'
+                }`}
+              >
+                <Trophy className={`w-4 h-4 shrink-0 ${currentTurnSeat === 0 && hasDrawnCard ? 'text-stone-950' : 'text-amber-400'}`} />
+                <span>SHOW</span>
+              </button>
+
               {/* DROP Button with dynamic penalty */}
               <button
                 onClick={handleOpenDropConfirm}
-                disabled={playerDropped || playerEliminated}
+                disabled={playerDropped || playerEliminated || tossState.phase !== 'COMPLETE'}
                 className={`text-white font-black text-xs sm:text-sm px-3.5 sm:px-5 py-1.5 rounded-xl shadow-lg uppercase active:scale-95 transition-all leading-tight text-center border ${
-                  playerDropped || playerEliminated
+                  playerDropped || playerEliminated || tossState.phase !== 'COMPLETE'
                     ? 'bg-stone-700/60 border-stone-600 opacity-50 cursor-not-allowed'
                     : 'bg-[#b91c1c] hover:bg-red-700 border-red-500/60'
                 }`}
@@ -2236,7 +2577,12 @@ export const RummyTable: React.FC = () => {
               {/* AUTO SORT Button */}
               <button
                 onClick={handleAutoSort}
-                className="bg-[#1d4ed8] hover:bg-blue-700 text-white font-black text-xs sm:text-sm px-3.5 sm:px-4 py-2 rounded-xl shadow-lg uppercase active:scale-95 transition-all flex items-center gap-1.5 border border-blue-400/50"
+                disabled={tossState.phase !== 'COMPLETE'}
+                className={`text-white font-black text-xs sm:text-sm px-3.5 sm:px-4 py-2 rounded-xl shadow-lg uppercase active:scale-95 transition-all flex items-center gap-1.5 border ${
+                  tossState.phase !== 'COMPLETE'
+                    ? 'bg-blue-950/60 text-blue-400/50 border-blue-900 opacity-50 cursor-not-allowed'
+                    : 'bg-[#1d4ed8] hover:bg-blue-700 border-blue-400/50'
+                }`}
               >
                 <div className="w-4 h-4 rounded bg-amber-400 text-amber-950 flex items-center justify-center text-xs font-black shadow-xs">
                   ✓

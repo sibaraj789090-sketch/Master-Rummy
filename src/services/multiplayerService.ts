@@ -17,7 +17,10 @@ import {
   isValidSet,
   validateRummyHand,
   RANKS,
+  executeRummyToss,
+  executeSequentialDeal,
 } from '../utils/rummyRules';
+import { TossResult } from '../types/rummy';
 
 export type { GameRoom, RoomPlayer, GameSession, PlayerGameState, LeaderboardEntry };
 
@@ -319,10 +322,35 @@ class MultiplayerService {
     return this.createRoom(params);
   }
 
-  // 5. Initialize Game Session (Deal 13 Cards to each player)
+  // 5. Initialize Game Session (Toss & Sequential Card Dealing)
   async startSession(roomId: string): Promise<GameSession> {
     const config = getSupabaseConfig();
+    const existing = this.localSessions.get(`session_${roomId}`);
+    if (existing && existing.status === 'ACTIVE' && existing.toss_result) {
+      return existing;
+    }
+
     const room = this.localRooms.get(roomId);
+    const players = this.localPlayers.get(roomId) || [];
+
+    // 1. Perform Toss before dealing playing cards
+    const tossPlayers = players.map((p) => ({
+      userId: p.user_id,
+      seatIndex: p.seat_index,
+      playerName: p.username,
+      avatar: p.avatar,
+    }));
+
+    const tossResult = executeRummyToss(tossPlayers, 1);
+
+    // Update dealer status in room players
+    const updatedPlayers = players.map((p) => ({
+      ...p,
+      is_dealer: p.seat_index === tossResult.dealerSeatIndex,
+    }));
+    this.localPlayers.set(roomId, updatedPlayers);
+
+    // 2. Select Wild Joker Card
     const suits: Suit[] = ['spades', 'hearts', 'diamonds', 'clubs'];
     const wildJokerRank = RANKS[Math.floor(Math.random() * RANKS.length)];
     const wildJokerSuit = suits[Math.floor(Math.random() * suits.length)];
@@ -336,16 +364,15 @@ class MultiplayerService {
       isJoker: true,
     };
 
-    // Create 2 shuffled decks
+    // 3. Create 2 shuffled decks and deal sequentially in toss turn order
     const deck = shuffleCards(createDeck(2, wildJokerRank));
-    const players = this.localPlayers.get(roomId) || [];
+    const dealResult = executeSequentialDeal(deck, tossResult, 13);
 
-    // Deal 13 cards to each seated player
     const playerStates: PlayerGameState[] = [];
     const cumulativeScores: Record<string, number> = {};
 
-    players.forEach((p) => {
-      const hand = deck.splice(0, 13);
+    updatedPlayers.forEach((p) => {
+      const hand = dealResult.handsBySeat[p.seat_index] || [];
       const g1 = hand.slice(0, 3);
       const g2 = hand.slice(3, 7);
       const g3 = hand.slice(7, 10);
@@ -366,7 +393,6 @@ class MultiplayerService {
       });
     });
 
-    const firstDiscard = deck.pop()!;
     const isPool = room?.variant === 'Pool';
     const isDeals = room?.variant === 'Deals';
     const elimThreshold = room?.elimination_threshold || (isPool ? (room?.game_type_detail === '201' ? 201 : 101) : undefined);
@@ -384,11 +410,14 @@ class MultiplayerService {
       round_history: [],
       is_table_completed: false,
       wild_joker_card: wildJokerCard,
-      closed_deck_count: deck.length,
-      discard_pile: [firstDiscard],
-      current_turn_seat: 0,
+      closed_deck_count: dealResult.remainingDeck.length,
+      discard_pile: [dealResult.firstDiscard],
+      current_turn_seat: tossResult.firstTurnSeat, // Toss winner gets 1st turn!
       turn_timer: 30,
       status: 'ACTIVE',
+      toss_result: tossResult,
+      turn_order: tossResult.players.map((tp) => tp.seatIndex),
+      dealer_seat_index: tossResult.dealerSeatIndex,
     };
 
     this.localSessions.set(session.id, session);
@@ -408,9 +437,9 @@ class MultiplayerService {
           round_history: session.round_history,
           is_table_completed: false,
           wild_joker_card: wildJokerCard,
-          closed_deck: deck,
-          discard_pile: [firstDiscard],
-          current_turn_seat: 0,
+          closed_deck: dealResult.remainingDeck,
+          discard_pile: [dealResult.firstDiscard],
+          current_turn_seat: tossResult.firstTurnSeat,
           turn_timer: 30,
           status: 'ACTIVE',
         });
@@ -1025,16 +1054,36 @@ class MultiplayerService {
       isJoker: true,
     };
 
-    const deck = shuffleCards(createDeck(2, wildJokerRank));
     const players = this.localPlayers.get(session.room_id) || [];
     const eliminatedIds = new Set(session.eliminated_user_ids || []);
+    const activePlayers = players.filter((p) => !eliminatedIds.has(p.user_id));
+
+    const nextRoundNumber = session.round_number + 1;
+
+    // 1. Fresh Toss for the new round with active seated players
+    const tossPlayers = activePlayers.map((p) => ({
+      userId: p.user_id,
+      seatIndex: p.seat_index,
+      playerName: p.username,
+      avatar: p.avatar,
+    }));
+
+    const tossResult = executeRummyToss(tossPlayers, nextRoundNumber);
+
+    // Update dealer status in room players
+    const updatedPlayers = players.map((p) => ({
+      ...p,
+      is_dealer: p.seat_index === tossResult.dealerSeatIndex,
+    }));
+    this.localPlayers.set(session.room_id, updatedPlayers);
+
+    // 2. Select Wild Joker Card
+    const deck = shuffleCards(createDeck(2, wildJokerRank));
+    const dealResult = executeSequentialDeal(deck, tossResult, 13);
 
     const updatedStates: PlayerGameState[] = [];
-    players.forEach((p) => {
-      // Skip eliminated players in Pool Rummy
-      if (eliminatedIds.has(p.user_id)) return;
-
-      const hand = deck.splice(0, 13);
+    activePlayers.forEach((p) => {
+      const hand = dealResult.handsBySeat[p.seat_index] || [];
       const g1 = hand.slice(0, 3);
       const g2 = hand.slice(3, 7);
       const g3 = hand.slice(7, 10);
@@ -1053,18 +1102,20 @@ class MultiplayerService {
       });
     });
 
-    const firstDiscard = deck.pop()!;
-    session.round_number += 1;
+    session.round_number = nextRoundNumber;
     if (session.total_deals) {
       session.deal_number = (session.deal_number || 1) + 1;
     }
     session.wild_joker_card = wildJokerCard;
-    session.closed_deck_count = deck.length;
-    session.discard_pile = [firstDiscard];
-    session.current_turn_seat = 0;
+    session.closed_deck_count = dealResult.remainingDeck.length;
+    session.discard_pile = [dealResult.firstDiscard];
+    session.current_turn_seat = tossResult.firstTurnSeat;
     session.turn_timer = 30;
     session.status = 'ACTIVE';
     session.winner_user_id = undefined;
+    session.toss_result = tossResult;
+    session.turn_order = tossResult.players.map((tp) => tp.seatIndex);
+    session.dealer_seat_index = tossResult.dealerSeatIndex;
 
     this.localSessions.set(sessionId, session);
     this.localPlayerStates.set(sessionId, updatedStates);
@@ -1078,9 +1129,9 @@ class MultiplayerService {
             round_number: session.round_number,
             deal_number: session.deal_number,
             wild_joker_card: wildJokerCard,
-            closed_deck: deck,
-            discard_pile: [firstDiscard],
-            current_turn_seat: 0,
+            closed_deck: dealResult.remainingDeck,
+            discard_pile: [dealResult.firstDiscard],
+            current_turn_seat: tossResult.firstTurnSeat,
             turn_timer: 30,
             status: 'ACTIVE',
             winner_user_id: null,

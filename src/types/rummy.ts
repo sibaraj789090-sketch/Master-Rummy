@@ -179,6 +179,31 @@ export interface RoundScoreRecord {
   eliminatedIds?: string[];
 }
 
+export interface TossCardPlayer {
+  userId: string;
+  seatIndex: number;
+  playerName: string;
+  avatar: string;
+  card: PlayingCard;
+  rankScore: number;
+  suitScore: number;
+  totalScore: number;
+  turnOrder: number; // 1 = 1st turn (highest card), 2 = 2nd, ..., N = last turn (lowest card)
+  isWinner: boolean;
+}
+
+export interface TossResult {
+  round: number;
+  players: TossCardPlayer[];
+  winnerUserId: string;
+  winnerSeatIndex: number;
+  winnerName: string;
+  firstTurnSeat: number;
+  dealerSeatIndex: number;
+  suitTieBreakerRule: string; // "Spades > Hearts > Clubs > Diamonds"
+  completedAt?: string;
+}
+
 export interface GameSession {
   id: string;
   room_id: string;
@@ -197,6 +222,9 @@ export interface GameSession {
   turn_timer: number;
   status: 'ACTIVE' | 'ROUND_FINISHED' | 'FINISHED';
   winner_user_id?: string;
+  toss_result?: TossResult;
+  turn_order?: number[];
+  dealer_seat_index?: number;
 }
 
 export interface PlayerGameState {
