@@ -407,10 +407,31 @@ export const RummyTable: React.FC = () => {
     };
   }, []);
 
+  const isCompactLandscape =
+    typeof window !== 'undefined' &&
+    (!isDevicePortrait || autoRotateLandscape) &&
+    Math.min(window.innerWidth, window.innerHeight) <= 560;
+
   // Lock into Landscape automatically when table starts
-  const lockLandscape = async () => {
-    sounds.playRotate();
+  const lockLandscape = async (fromUserGesture = false) => {
+    if (fromUserGesture) sounds.playRotate();
     setIsAutoRotating(true);
+
+    // Browsers generally require a user gesture before entering fullscreen.
+    // Try it only from the rotate button; CSS rotation remains the web fallback.
+    if (fromUserGesture && typeof document !== 'undefined' && !document.fullscreenElement) {
+      try {
+        const docEl = document.documentElement as any;
+        const request =
+          docEl.requestFullscreen ||
+          docEl.webkitRequestFullscreen ||
+          docEl.mozRequestFullScreen ||
+          docEl.msRequestFullscreen;
+        await request?.call(docEl);
+      } catch {
+        // Fullscreen is optional; orientation lock and the CSS fallback still work.
+      }
+    }
 
     // 1. Native Capacitor Screen Orientation (for Android APK / device)
     try {
@@ -421,24 +442,6 @@ export const RummyTable: React.FC = () => {
     try {
       if (typeof window !== 'undefined' && 'screen' in window && window.screen.orientation) {
         await (window.screen.orientation as any).lock?.('landscape');
-      }
-    } catch {}
-
-    // 3. Fullscreen trigger if required for browser orientation lock
-    try {
-      if (typeof document !== 'undefined') {
-        const docEl = document.documentElement as any;
-        const req =
-          docEl.requestFullscreen ||
-          docEl.webkitRequestFullscreen ||
-          docEl.mozRequestFullScreen ||
-          docEl.msRequestFullscreen;
-        if (req && !document.fullscreenElement) {
-          await req.call(docEl).catch(() => {});
-          if (window.screen.orientation && (window.screen.orientation as any).lock) {
-            await (window.screen.orientation as any).lock('landscape').catch(() => {});
-          }
-        }
       }
     } catch {}
 
@@ -1516,7 +1519,7 @@ export const RummyTable: React.FC = () => {
     setIsLandscape(nextVal);
 
     if (nextVal) {
-      await lockLandscape();
+      await lockLandscape(true);
     } else {
       try {
         await ScreenOrientation.unlock().catch(() => {});
@@ -1627,7 +1630,9 @@ export const RummyTable: React.FC = () => {
             }
           : {}
       }
-      className="fixed inset-0 z-50 bg-[#070b14] text-white flex flex-col justify-between select-none overflow-hidden font-sans"
+      className={`rummy-game-root fixed inset-0 z-50 bg-[#070b14] text-white flex flex-col justify-between select-none overflow-hidden font-sans ${
+        isCompactLandscape ? 'rummy-game-root--compact-landscape' : ''
+      }`}
     >
       {/* Auto-Rotating to Landscape Notification Badge */}
       {isAutoRotating && (
@@ -1638,7 +1643,7 @@ export const RummyTable: React.FC = () => {
       )}
 
       {/* 1. Sleek In-Game Top Bar matching photo */}
-      <div className="w-full bg-[#0a0f18] px-3 sm:px-6 py-1.5 flex items-center justify-between text-xs z-30 shrink-0">
+      <div className="rummy-table-topbar w-full bg-[#0a0f18] px-3 sm:px-6 py-1.5 flex items-center justify-between text-xs z-30 shrink-0">
         {/* Left: Circular Menu Button */}
         <button
           onClick={() => {
@@ -1692,9 +1697,9 @@ export const RummyTable: React.FC = () => {
       </div>
 
       {/* 2. Main Large Wide Oval Rummy Felt Table Arena (Zoomed out for comfortable framing & breathing room on all tables) */}
-      <div className="flex-1 w-full flex items-center justify-center p-1 sm:p-2 md:p-3 overflow-hidden relative">
+      <div className="rummy-table-stage flex-1 w-full flex items-center justify-center p-1 sm:p-2 md:p-3 overflow-hidden relative">
         <div
-          className="w-[98%] sm:w-[96%] md:w-[95%] max-w-[1360px] h-[95%] sm:h-[94%] my-auto felt-table felt-wood-border rounded-[48px] sm:rounded-[72px] md:rounded-[96px] lg:rounded-[120px] flex flex-col justify-between p-1.5 sm:p-2.5 md:p-3.5 overflow-hidden relative shadow-[0_25px_60px_rgba(0,0,0,0.95)] transition-all"
+          className="rummy-table-felt w-[98%] sm:w-[96%] md:w-[95%] max-w-[1360px] h-[95%] sm:h-[94%] my-auto felt-table felt-wood-border rounded-[48px] sm:rounded-[72px] md:rounded-[96px] lg:rounded-[120px] flex flex-col justify-between p-1.5 sm:p-2.5 md:p-3.5 overflow-hidden relative shadow-[0_25px_60px_rgba(0,0,0,0.95)] transition-all"
         >
           {/* In-Game Sleek Toast Notification */}
           {tableToast && (
@@ -1851,7 +1856,7 @@ export const RummyTable: React.FC = () => {
           {/* OPPONENT SEATS RENDERING */}
           {playersMode === 2 ? (
             /* 2-Player Table: Single Opponent at top center matching reference screenshot */
-            <div className="flex justify-center pt-0.5 sm:pt-1 z-20 shrink-0">
+            <div className="rummy-table-opponents flex justify-center pt-0.5 sm:pt-1 z-20 shrink-0">
               <div className="flex flex-col items-center relative">
                 {seats[0]?.activeChat && (
                   <div className="absolute -top-7 bg-white text-slate-900 font-bold text-xs px-2.5 py-0.5 rounded-lg shadow-lg z-30 whitespace-nowrap animate-bounce">
@@ -1925,7 +1930,7 @@ export const RummyTable: React.FC = () => {
             </div>
           ) : (
             /* 6-Player Table: 5 Opponents across top curve */
-            <div className="grid grid-cols-5 gap-1.5 sm:gap-3 px-2 sm:px-6 pt-0.5 z-20 max-w-3xl mx-auto w-full shrink-0">
+            <div className="rummy-table-opponents grid grid-cols-5 gap-1.5 sm:gap-3 px-2 sm:px-6 pt-0.5 z-20 max-w-3xl mx-auto w-full shrink-0">
               {seats.map((seat, idx) => {
                 const seatTurnIndex = idx + 1;
                 const isThisBotTurn = currentTurnSeat === seatTurnIndex;
@@ -2004,7 +2009,7 @@ export const RummyTable: React.FC = () => {
           )}
 
           {/* 3. CENTER TABLE: Wild Joker + Closed Deck + Finish Slot + Open Discard Pile (Enlarged Card Sizes) */}
-          <div className="my-auto flex items-center justify-center gap-6 sm:gap-10 md:gap-14 z-20 relative py-1">
+          <div className="rummy-table-center-row my-auto flex items-center justify-center gap-6 sm:gap-10 md:gap-14 z-20 relative py-1">
             {/* Left: Wild Joker + Closed Deck */}
             <div className="relative flex items-center">
               {/* Sideways Wild Joker Card */}
@@ -2027,7 +2032,7 @@ export const RummyTable: React.FC = () => {
               <div
                 onClick={handleDrawClosed}
                 title="Tap to draw from Closed Deck"
-                className={`relative w-20 sm:w-24 md:w-28 lg:w-30 h-28 sm:h-34 md:h-40 lg:h-44 cursor-pointer hover:scale-105 active:scale-95 transition-all z-20 ${
+                className={`rummy-pile-card relative w-20 sm:w-24 md:w-28 lg:w-30 h-28 sm:h-34 md:h-40 lg:h-44 cursor-pointer hover:scale-105 active:scale-95 transition-all z-20 ${
                   currentTurnSeat === 0 && !hasDrawnCard && !playerDropped && !playerEliminated
                     ? 'ring-4 ring-yellow-400 shadow-[0_0_28px_rgba(250,204,21,0.95)] animate-pulse'
                     : 'shadow-2xl'
@@ -2050,7 +2055,7 @@ export const RummyTable: React.FC = () => {
                 }
               }}
               title="Finish Slot (Select 1 card to Declare / SHOW)"
-              className={`w-20 sm:w-24 md:w-28 lg:w-30 h-28 sm:h-34 md:h-40 lg:h-44 rounded-2xl border-2 border-emerald-500/80 bg-gradient-to-b from-emerald-950/80 to-emerald-900/90 flex flex-col items-center justify-center text-center cursor-pointer hover:bg-emerald-900/80 hover:border-emerald-300 transition-all p-1.5 shadow-[inset_0_2px_10px_rgba(0,0,0,0.6)] ${
+              className={`rummy-finish-slot w-20 sm:w-24 md:w-28 lg:w-30 h-28 sm:h-34 md:h-40 lg:h-44 rounded-2xl border-2 border-emerald-500/80 bg-gradient-to-b from-emerald-950/80 to-emerald-900/90 flex flex-col items-center justify-center text-center cursor-pointer hover:bg-emerald-900/80 hover:border-emerald-300 transition-all p-1.5 shadow-[inset_0_2px_10px_rgba(0,0,0,0.6)] ${
                 selectedCards.length === 1 && currentTurnSeat === 0 ? 'ring-4 ring-amber-400 ring-offset-2 ring-offset-emerald-950 animate-pulse scale-105' : ''
               }`}
             >
@@ -2071,7 +2076,7 @@ export const RummyTable: React.FC = () => {
                 <div
                   onClick={handleDrawOpen}
                   title="Draw from Open Discard Pile"
-                  className={`w-20 sm:w-24 md:w-28 lg:w-30 h-28 sm:h-34 md:h-40 lg:h-44 bg-white rounded-xl border-2 border-slate-300 shadow-2xl flex flex-col justify-between p-1.5 sm:p-2 cursor-pointer hover:scale-105 active:scale-95 transition-all z-10 select-none ${
+                  className={`rummy-pile-card w-20 sm:w-24 md:w-28 lg:w-30 h-28 sm:h-34 md:h-40 lg:h-44 bg-white rounded-xl border-2 border-slate-300 shadow-2xl flex flex-col justify-between p-1.5 sm:p-2 cursor-pointer hover:scale-105 active:scale-95 transition-all z-10 select-none ${
                     currentTurnSeat === 0 && !hasDrawnCard && !playerDropped && !playerEliminated
                       ? 'ring-4 ring-emerald-400 shadow-[0_0_25px_rgba(52,211,153,0.9)] animate-pulse'
                       : ''
@@ -2104,7 +2109,7 @@ export const RummyTable: React.FC = () => {
                   </div>
                 </div>
               ) : (
-                <div className="w-20 sm:w-24 md:w-28 lg:w-30 h-28 sm:h-34 md:h-40 lg:h-44 rounded-xl border-2 border-dashed border-stone-600/70 flex items-center justify-center text-xs text-stone-500 font-bold">
+                <div className="rummy-pile-card w-20 sm:w-24 md:w-28 lg:w-30 h-28 sm:h-34 md:h-40 lg:h-44 rounded-xl border-2 border-dashed border-stone-600/70 flex items-center justify-center text-xs text-stone-500 font-bold">
                   EMPTY
                 </div>
               )}
@@ -2128,12 +2133,12 @@ export const RummyTable: React.FC = () => {
 
           {/* 4. PLAYER HAND: 13 Large Cards in Meld Groups with Drag-and-Drop & Tap-to-Move */}
           <div
-            className="w-full flex justify-center z-20 px-1 sm:px-2 pb-1 shrink-0"
+            className="rummy-table-hand w-full flex justify-center z-20 px-1 sm:px-2 pb-1 shrink-0"
             onTouchMove={handleCardTouchMove}
             onTouchEnd={handleCardTouchEnd}
             onTouchCancel={handleCardTouchCancel}
           >
-            <div className="flex items-end justify-center gap-1.5 sm:gap-2.5 md:gap-3.5 max-w-full overflow-x-auto no-scrollbar py-1 px-1">
+            <div className="rummy-table-hand-cards flex items-end justify-center gap-1.5 sm:gap-2.5 md:gap-3.5 max-w-full overflow-x-auto no-scrollbar py-1 px-1">
               {cardGroups.map((group, groupIdx) => {
                 const groupStatus = getGroupStatus(group);
                 const isHovered =
@@ -2197,7 +2202,7 @@ export const RummyTable: React.FC = () => {
                             : 'text-slate-900';
                         const suitSymbol = getSuitSymbol(card.suit);
 
-                        const cardClassName = `w-[66px] sm:w-[78px] md:w-[90px] lg:w-[102px] h-[98px] sm:h-[116px] md:h-[134px] lg:h-[150px] shrink-0 rounded-lg sm:rounded-xl cursor-grab active:cursor-grabbing transition-all duration-150 flex select-none relative ${
+                        const cardClassName = `rummy-playing-card w-[66px] sm:w-[78px] md:w-[90px] lg:w-[102px] h-[98px] sm:h-[116px] md:h-[134px] lg:h-[150px] shrink-0 rounded-lg sm:rounded-xl cursor-grab active:cursor-grabbing transition-all duration-150 flex select-none relative ${
                           isSelected
                             ? 'transform -translate-y-5 sm:-translate-y-7 ring-4 ring-amber-400 shadow-2xl z-30'
                             : 'hover:-translate-y-2 z-10'
@@ -2347,7 +2352,7 @@ export const RummyTable: React.FC = () => {
           </div>
 
           {/* 5. BOTTOM CONTROL BAR */}
-          <div className="w-full bg-[#0d121c]/95 border-t border-stone-800/80 px-2 sm:px-4 py-1.5 flex items-center justify-between z-30 shrink-0">
+          <div className="rummy-table-footer w-full bg-[#0d121c]/95 border-t border-stone-800/80 px-2 sm:px-4 py-1.5 flex items-center justify-between z-30 shrink-0">
             {/* Left: Mode / Stake Pill + Plus Button */}
             <div className="flex items-center gap-1.5 sm:gap-2">
               <button

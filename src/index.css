@@ -49,3 +49,82 @@
 .red-header-bg {
   background: linear-gradient(180deg, #6b0c15 0%, #4a070e 100%);
 }
+
+/* Keep the rummy table readable on short landscape screens, including the
+   CSS-rotated fallback used when a mobile browser cannot lock orientation. */
+.rummy-game-root--compact-landscape .rummy-table-topbar {
+  min-height: 36px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+
+.rummy-game-root--compact-landscape .rummy-table-topbar > button {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+}
+
+.rummy-game-root--compact-landscape .rummy-table-topbar > div {
+  gap: 6px;
+  max-width: calc(100% - 82px);
+  padding: 3px 9px;
+}
+
+.rummy-game-root--compact-landscape .rummy-table-stage {
+  min-height: 0;
+  padding: 2px;
+}
+
+.rummy-game-root--compact-landscape .rummy-table-felt {
+  width: 99%;
+  height: 98%;
+  max-width: none;
+  padding: 3px;
+  border-width: 5px;
+  border-radius: 48px;
+}
+
+.rummy-game-root--compact-landscape .rummy-table-opponents {
+  zoom: 0.82;
+}
+
+.rummy-game-root--compact-landscape .rummy-table-center-row {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-top: 0;
+  margin-bottom: 0;
+  padding-top: 2px;
+  padding-bottom: 2px;
+  gap: clamp(12px, 3vw, 34px);
+}
+
+.rummy-game-root--compact-landscape .rummy-pile-card,
+.rummy-game-root--compact-landscape .rummy-finish-slot {
+  width: clamp(64px, 8vh, 86px);
+  height: clamp(76px, 11vh, 96px);
+}
+
+.rummy-game-root--compact-landscape .rummy-finish-slot {
+  padding: 4px;
+}
+
+.rummy-game-root--compact-landscape .rummy-table-hand {
+  min-height: 0;
+  padding: 0;
+}
+
+.rummy-game-root--compact-landscape .rummy-table-hand-cards {
+  gap: 4px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+
+.rummy-game-root--compact-landscape .rummy-playing-card {
+  width: clamp(58px, 7.5vh, 78px);
+  height: clamp(80px, 10vh, 88px);
+}
+
+.rummy-game-root--compact-landscape .rummy-table-footer {
+  min-height: 40px;
+  padding: 3px 8px;
+}

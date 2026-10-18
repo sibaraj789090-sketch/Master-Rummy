@@ -1,0 +1,1 @@
+- [npm peer resolution](npm-peer-resolution.md) — npm 10 can crash resolving Vite 8 optional devtools peers; `legacy-peer-deps` allowed installation here.
