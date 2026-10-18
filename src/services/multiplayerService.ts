@@ -1,5 +1,14 @@
 import { supabase, getSupabaseConfig } from '../lib/supabase';
-import { PlayingCard, Rank, Suit } from '../types/rummy';
+import {
+  PlayingCard,
+  Rank,
+  Suit,
+  GameRoom,
+  RoomPlayer,
+  GameSession,
+  PlayerGameState,
+  LeaderboardEntry,
+} from '../types/rummy';
 import {
   createDeck,
   shuffleCards,
@@ -10,64 +19,7 @@ import {
   RANKS,
 } from '../utils/rummyRules';
 
-export interface GameRoom {
-  id: string;
-  room_code: string;
-  variant: 'Points' | 'Pool' | 'Deals';
-  max_players: 2 | 6;
-  entry_chips: number;
-  point_value: number;
-  status: 'WAITING' | 'COUNTDOWN' | 'IN_PLAY' | 'COMPLETED' | 'ABANDONED';
-  created_by?: string;
-  created_at: string;
-}
-
-export interface RoomPlayer {
-  id: string;
-  room_id: string;
-  user_id: string;
-  username: string;
-  avatar: string;
-  seat_index: number;
-  status: 'WAITING' | 'READY' | 'PLAYING' | 'DROPPED' | 'DISCONNECTED';
-  is_dealer: boolean;
-  joined_at: string;
-}
-
-export interface GameSession {
-  id: string;
-  room_id: string;
-  round_number: number;
-  wild_joker_card: PlayingCard;
-  closed_deck_count: number;
-  discard_pile: PlayingCard[];
-  current_turn_seat: number;
-  turn_timer: number;
-  status: 'ACTIVE' | 'FINISHED';
-  winner_user_id?: string;
-}
-
-export interface PlayerGameState {
-  id: string;
-  session_id: string;
-  user_id: string;
-  seat_index: number;
-  hand_cards: PlayingCard[];
-  card_groups: PlayingCard[][];
-  has_drawn: boolean;
-  score: number;
-  status: 'PLAYING' | 'DROPPED' | 'SHOW' | 'WON';
-}
-
-export interface LeaderboardEntry {
-  user_id: string;
-  username: string;
-  avatar: string;
-  wins: number;
-  matches_played: number;
-  practice_chips: number;
-  win_rate: number;
-}
+export type { GameRoom, RoomPlayer, GameSession, PlayerGameState, LeaderboardEntry };
 
 // Local In-Memory & BroadcastChannel store for zero-latency cross-tab & offline testing
 const broadcastChannel =
@@ -99,6 +51,9 @@ class MultiplayerService {
   // 1. Create a Game Room
   async createRoom(params: {
     variant: 'Points' | 'Pool' | 'Deals';
+    gameTypeDetail?: string;
+    eliminationThreshold?: number;
+    totalDeals?: number;
     maxPlayers: 2 | 6;
     entryChips: number;
     pointValue: number;
@@ -113,6 +68,9 @@ class MultiplayerService {
       id: `room_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       room_code: roomCode,
       variant: params.variant,
+      game_type_detail: params.gameTypeDetail || (params.variant === 'Pool' ? '101' : params.variant === 'Deals' ? '2' : 'Classic'),
+      elimination_threshold: params.eliminationThreshold || (params.variant === 'Pool' ? (params.gameTypeDetail === '201' ? 201 : 101) : undefined),
+      total_deals: params.totalDeals || (params.variant === 'Deals' ? (params.gameTypeDetail === '3' ? 3 : 2) : undefined),
       max_players: params.maxPlayers,
       entry_chips: params.entryChips,
       point_value: params.pointValue,
@@ -140,6 +98,9 @@ class MultiplayerService {
           .insert({
             room_code: newRoom.room_code,
             variant: newRoom.variant,
+            game_type_detail: newRoom.game_type_detail,
+            elimination_threshold: newRoom.elimination_threshold,
+            total_deals: newRoom.total_deals,
             max_players: newRoom.max_players,
             entry_chips: newRoom.entry_chips,
             point_value: newRoom.point_value,
@@ -283,6 +244,9 @@ class MultiplayerService {
   // 4. Quick Matchmaking (Find or Create Room)
   async findOrCreateMatch(params: {
     variant: 'Points' | 'Pool' | 'Deals';
+    gameTypeDetail?: string;
+    eliminationThreshold?: number;
+    totalDeals?: number;
     maxPlayers: 2 | 6;
     entryChips: number;
     pointValue: number;
@@ -291,15 +255,22 @@ class MultiplayerService {
     avatar: string;
   }): Promise<{ room: GameRoom; player: RoomPlayer }> {
     const config = getSupabaseConfig();
+    const detail = params.gameTypeDetail || (params.variant === 'Pool' ? '101' : params.variant === 'Deals' ? '2' : 'Classic');
 
     if (config.isConfigured) {
       try {
-        const { data: availableRooms } = await supabase
+        let query = supabase
           .from('game_rooms')
           .select('*, room_players(*)')
           .eq('variant', params.variant)
           .eq('max_players', params.maxPlayers)
-          .eq('status', 'WAITING')
+          .eq('status', 'WAITING');
+
+        if (detail) {
+          query = query.eq('game_type_detail', detail);
+        }
+
+        const { data: availableRooms } = await query
           .order('created_at', { ascending: false })
           .limit(1);
 
@@ -326,6 +297,7 @@ class MultiplayerService {
     for (const [id, r] of this.localRooms.entries()) {
       if (
         r.variant === params.variant &&
+        (r.game_type_detail === detail || !r.game_type_detail) &&
         r.max_players === params.maxPlayers &&
         r.status === 'WAITING'
       ) {
@@ -350,6 +322,7 @@ class MultiplayerService {
   // 5. Initialize Game Session (Deal 13 Cards to each player)
   async startSession(roomId: string): Promise<GameSession> {
     const config = getSupabaseConfig();
+    const room = this.localRooms.get(roomId);
     const suits: Suit[] = ['spades', 'hearts', 'diamonds', 'clubs'];
     const wildJokerRank = RANKS[Math.floor(Math.random() * RANKS.length)];
     const wildJokerSuit = suits[Math.floor(Math.random() * suits.length)];
@@ -369,12 +342,16 @@ class MultiplayerService {
 
     // Deal 13 cards to each seated player
     const playerStates: PlayerGameState[] = [];
+    const cumulativeScores: Record<string, number> = {};
+
     players.forEach((p) => {
       const hand = deck.splice(0, 13);
       const g1 = hand.slice(0, 3);
       const g2 = hand.slice(3, 7);
       const g3 = hand.slice(7, 10);
       const g4 = hand.slice(10);
+
+      cumulativeScores[p.user_id] = 0;
 
       playerStates.push({
         id: `pgs_${p.user_id}`,
@@ -390,10 +367,22 @@ class MultiplayerService {
     });
 
     const firstDiscard = deck.pop()!;
+    const isPool = room?.variant === 'Pool';
+    const isDeals = room?.variant === 'Deals';
+    const elimThreshold = room?.elimination_threshold || (isPool ? (room?.game_type_detail === '201' ? 201 : 101) : undefined);
+    const totalDeals = room?.total_deals || (isDeals ? (room?.game_type_detail === '3' ? 3 : 2) : undefined);
+
     const session: GameSession = {
       id: `session_${roomId}`,
       room_id: roomId,
       round_number: 1,
+      deal_number: isDeals ? 1 : undefined,
+      total_deals: totalDeals,
+      elimination_threshold: elimThreshold,
+      cumulative_scores: cumulativeScores,
+      eliminated_user_ids: [],
+      round_history: [],
+      is_table_completed: false,
       wild_joker_card: wildJokerCard,
       closed_deck_count: deck.length,
       discard_pile: [firstDiscard],
@@ -410,6 +399,14 @@ class MultiplayerService {
         await supabase.from('game_sessions').upsert({
           id: session.id,
           room_id: roomId,
+          round_number: 1,
+          deal_number: session.deal_number,
+          total_deals: session.total_deals,
+          elimination_threshold: session.elimination_threshold,
+          cumulative_scores: session.cumulative_scores,
+          eliminated_user_ids: session.eliminated_user_ids,
+          round_history: session.round_history,
+          is_table_completed: false,
           wild_joker_card: wildJokerCard,
           closed_deck: deck,
           discard_pile: [firstDiscard],
@@ -760,7 +757,7 @@ class MultiplayerService {
     return { success: true, nextTurnSeat: nextTurn };
   }
 
-  // 5e. Declare Show & Validate Win
+  // 5e. Declare Show & Validate Win with Multi-Mode Scoring
   async declareShow(
     sessionId: string,
     userId: string,
@@ -770,50 +767,161 @@ class MultiplayerService {
     isValid: boolean;
     statusMessage: string;
     points: number;
+    isTableComplete?: boolean;
+    tableWinnerId?: string;
+    roundRecord?: any;
   }> {
     const session = await this.getSession(sessionId);
     const validation = validateRummyHand(cardGroups, wildJokerRank);
     const config = getSupabaseConfig();
+    const room = session ? this.localRooms.get(session.room_id) : null;
+    const playerStates = this.localPlayerStates.get(sessionId) || [];
 
     if (validation.isValidDeclaration) {
       if (session) {
-        session.status = 'FINISHED';
-        session.winner_user_id = userId;
-        this.localSessions.set(sessionId, session);
-      }
+        const roundScores: Record<string, number> = {};
+        const prevCumulative = session.cumulative_scores || {};
+        const newCumulative: Record<string, number> = {};
 
-      if (config.isConfigured) {
-        try {
-          await supabase
-            .from('game_sessions')
-            .update({ status: 'FINISHED', winner_user_id: userId })
-            .eq('id', sessionId);
-
-          await supabase.from('game_moves').insert({
-            session_id: sessionId,
-            user_id: userId,
-            seat_index: 0,
-            move_type: 'DECLARE',
-            card_data: { valid: true, validation },
-          });
-        } catch {}
-      }
-
-      if (broadcastChannel) {
-        broadcastChannel.postMessage({
-          type: 'GAME_FINISHED',
-          payload: { sessionId, winnerUserId: userId, validation },
+        // Calculate scores for all players in this round
+        playerStates.forEach((ps) => {
+          if (ps.user_id === userId) {
+            roundScores[ps.user_id] = 0;
+            ps.status = 'WON';
+            ps.score = 0;
+          } else if (ps.status === 'DROPPED') {
+            roundScores[ps.user_id] = ps.score; // Already calculated drop penalty
+          } else {
+            // Unmelded hand points capped at 80
+            const opponentVal = validateRummyHand(ps.card_groups || [], wildJokerRank);
+            roundScores[ps.user_id] = opponentVal.totalPoints;
+            ps.score = opponentVal.totalPoints;
+          }
+          newCumulative[ps.user_id] = (prevCumulative[ps.user_id] || 0) + roundScores[ps.user_id];
         });
-      }
 
-      return {
-        isValid: true,
-        statusMessage: 'Valid Show! Congratulations on winning the hand.',
-        points: 0,
-      };
+        session.cumulative_scores = newCumulative;
+
+        const isPoints = room?.variant === 'Points' || !room?.variant;
+        const isPool = room?.variant === 'Pool';
+        const isDeals = room?.variant === 'Deals';
+
+        let isTableComplete = false;
+        let tableWinnerId: string | undefined = undefined;
+        let eliminatedIds: string[] = session.eliminated_user_ids || [];
+
+        if (isPoints) {
+          isTableComplete = true;
+          tableWinnerId = userId;
+          session.status = 'FINISHED';
+          session.winner_user_id = userId;
+          session.is_table_completed = true;
+        } else if (isPool) {
+          const threshold = session.elimination_threshold || 101;
+          const newlyEliminated: string[] = [];
+          const remainingEligible: string[] = [];
+
+          Object.entries(newCumulative).forEach(([uid, score]) => {
+            if (score >= threshold) {
+              newlyEliminated.push(uid);
+            } else {
+              remainingEligible.push(uid);
+            }
+          });
+
+          eliminatedIds = Array.from(new Set([...eliminatedIds, ...newlyEliminated]));
+          session.eliminated_user_ids = eliminatedIds;
+
+          if (remainingEligible.length <= 1) {
+            isTableComplete = true;
+            tableWinnerId = remainingEligible.length === 1 ? remainingEligible[0] : userId;
+            session.status = 'FINISHED';
+            session.winner_user_id = tableWinnerId;
+            session.is_table_completed = true;
+          } else {
+            session.status = 'ROUND_FINISHED';
+            session.winner_user_id = userId;
+          }
+        } else if (isDeals) {
+          const currentDeal = session.deal_number || 1;
+          const totalDeals = session.total_deals || 2;
+
+          if (currentDeal >= totalDeals) {
+            isTableComplete = true;
+            // Rank by lowest cumulative score
+            let lowestScore = Infinity;
+            let lowestUser = userId;
+            Object.entries(newCumulative).forEach(([uid, score]) => {
+              if (score < lowestScore) {
+                lowestScore = score;
+                lowestUser = uid;
+              }
+            });
+            tableWinnerId = lowestUser;
+            session.status = 'FINISHED';
+            session.winner_user_id = tableWinnerId;
+            session.is_table_completed = true;
+          } else {
+            session.status = 'ROUND_FINISHED';
+            session.winner_user_id = userId;
+          }
+        }
+
+        const roundRecord = {
+          round: session.round_number,
+          deal: session.deal_number,
+          winnerId: userId,
+          scores: roundScores,
+          cumulativeScores: newCumulative,
+          eliminatedIds,
+        };
+
+        session.round_history = [...(session.round_history || []), roundRecord];
+        this.localSessions.set(sessionId, session);
+
+        if (config.isConfigured) {
+          try {
+            await supabase
+              .from('game_sessions')
+              .update({
+                status: session.status,
+                winner_user_id: session.winner_user_id,
+                cumulative_scores: session.cumulative_scores,
+                eliminated_user_ids: session.eliminated_user_ids,
+                round_history: session.round_history,
+                is_table_completed: session.is_table_completed,
+              })
+              .eq('id', sessionId);
+
+            await supabase.from('game_moves').insert({
+              session_id: sessionId,
+              user_id: userId,
+              seat_index: 0,
+              move_type: 'DECLARE',
+              card_data: { valid: true, validation, roundRecord },
+            });
+          } catch {}
+        }
+
+        if (broadcastChannel) {
+          broadcastChannel.postMessage({
+            type: session.status === 'FINISHED' ? 'GAME_FINISHED' : 'ROUND_FINISHED',
+            payload: { sessionId, winnerUserId: userId, roundRecord, isTableComplete, tableWinnerId },
+          });
+        }
+
+        return {
+          isValid: true,
+          statusMessage: 'Valid Show! Congratulations on winning the hand.',
+          points: 0,
+          isTableComplete,
+          tableWinnerId,
+          roundRecord,
+        };
+      }
     }
 
-    // Invalid declaration
+    // Invalid declaration penalty: 80 points
     if (config.isConfigured) {
       try {
         await supabase.from('game_moves').insert({
@@ -829,8 +937,165 @@ class MultiplayerService {
     return {
       isValid: false,
       statusMessage: validation.statusMessage,
-      points: validation.totalPoints,
+      points: 80,
     };
+  }
+
+  // 5f. Player Drop Action
+  async dropPlayer(
+    sessionId: string,
+    userId: string,
+    isMiddleDrop: boolean,
+    totalSeats: number = 2
+  ): Promise<{ success: boolean; penalty: number; nextTurnSeat?: number; roundFinished?: boolean }> {
+    const session = await this.getSession(sessionId);
+    if (!session) return { success: false, penalty: 20 };
+
+    const room = this.localRooms.get(session.room_id);
+    const isPool201 = room?.variant === 'Pool' && room?.game_type_detail === '201';
+    const penalty = isPool201 ? (isMiddleDrop ? 50 : 25) : isMiddleDrop ? 40 : 20;
+
+    const playerStates = this.localPlayerStates.get(sessionId) || [];
+    const pState = playerStates.find((p) => p.user_id === userId);
+    if (pState) {
+      pState.status = 'DROPPED';
+      pState.score = penalty;
+    }
+
+    // Check how many players are still playing in this round
+    const activeRemaining = playerStates.filter((p) => p.status === 'PLAYING');
+    let roundFinished = false;
+
+    if (activeRemaining.length === 1) {
+      // Remaining player wins the round!
+      roundFinished = true;
+      const lastPlayer = activeRemaining[0];
+      await this.declareShow(
+        sessionId,
+        lastPlayer.user_id,
+        lastPlayer.card_groups || [],
+        session.wild_joker_card.rank
+      );
+    } else {
+      // Advance turn to next active player
+      const nextTurn = (session.current_turn_seat + 1) % totalSeats;
+      session.current_turn_seat = nextTurn;
+      session.turn_timer = 30;
+      this.localSessions.set(sessionId, session);
+    }
+
+    const config = getSupabaseConfig();
+    if (config.isConfigured) {
+      try {
+        await supabase.from('game_moves').insert({
+          session_id: sessionId,
+          user_id: userId,
+          seat_index: pState?.seat_index ?? 0,
+          move_type: 'DROP',
+          card_data: { penalty, isMiddleDrop },
+        });
+      } catch {}
+    }
+
+    if (broadcastChannel) {
+      broadcastChannel.postMessage({
+        type: 'PLAYER_DROPPED',
+        payload: { sessionId, userId, penalty, roundFinished },
+      });
+    }
+
+    return { success: true, penalty, roundFinished };
+  }
+
+  // 5g. Start Next Round or Deal (for Pool & Deals Rummy)
+  async startNextRoundOrDeal(sessionId: string): Promise<GameSession | null> {
+    const session = await this.getSession(sessionId);
+    if (!session) return null;
+
+    const suits: Suit[] = ['spades', 'hearts', 'diamonds', 'clubs'];
+    const wildJokerRank = RANKS[Math.floor(Math.random() * RANKS.length)];
+    const wildJokerSuit = suits[Math.floor(Math.random() * suits.length)];
+
+    const wildJokerCard: PlayingCard = {
+      id: `wj_${Date.now()}_${wildJokerRank}_${wildJokerSuit}`,
+      rank: wildJokerRank,
+      suit: wildJokerSuit,
+      value: 10,
+      points: 10,
+      isJoker: true,
+    };
+
+    const deck = shuffleCards(createDeck(2, wildJokerRank));
+    const players = this.localPlayers.get(session.room_id) || [];
+    const eliminatedIds = new Set(session.eliminated_user_ids || []);
+
+    const updatedStates: PlayerGameState[] = [];
+    players.forEach((p) => {
+      // Skip eliminated players in Pool Rummy
+      if (eliminatedIds.has(p.user_id)) return;
+
+      const hand = deck.splice(0, 13);
+      const g1 = hand.slice(0, 3);
+      const g2 = hand.slice(3, 7);
+      const g3 = hand.slice(7, 10);
+      const g4 = hand.slice(10);
+
+      updatedStates.push({
+        id: `pgs_${p.user_id}_${Date.now()}`,
+        session_id: sessionId,
+        user_id: p.user_id,
+        seat_index: p.seat_index,
+        hand_cards: hand,
+        card_groups: [g1, g2, g3, g4],
+        has_drawn: false,
+        score: 80,
+        status: 'PLAYING',
+      });
+    });
+
+    const firstDiscard = deck.pop()!;
+    session.round_number += 1;
+    if (session.total_deals) {
+      session.deal_number = (session.deal_number || 1) + 1;
+    }
+    session.wild_joker_card = wildJokerCard;
+    session.closed_deck_count = deck.length;
+    session.discard_pile = [firstDiscard];
+    session.current_turn_seat = 0;
+    session.turn_timer = 30;
+    session.status = 'ACTIVE';
+    session.winner_user_id = undefined;
+
+    this.localSessions.set(sessionId, session);
+    this.localPlayerStates.set(sessionId, updatedStates);
+
+    const config = getSupabaseConfig();
+    if (config.isConfigured) {
+      try {
+        await supabase
+          .from('game_sessions')
+          .update({
+            round_number: session.round_number,
+            deal_number: session.deal_number,
+            wild_joker_card: wildJokerCard,
+            closed_deck: deck,
+            discard_pile: [firstDiscard],
+            current_turn_seat: 0,
+            turn_timer: 30,
+            status: 'ACTIVE',
+            winner_user_id: null,
+          })
+          .eq('id', sessionId);
+      } catch (err) {
+        console.warn('startNextRoundOrDeal update error:', err);
+      }
+    }
+
+    if (broadcastChannel) {
+      broadcastChannel.postMessage({ type: 'SESSION_UPDATED', payload: session });
+    }
+
+    return session;
   }
 
   // 6b. Subscribe to Active Game Session

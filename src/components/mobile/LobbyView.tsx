@@ -130,9 +130,12 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
         ? currentPoolEntry
         : currentDealEntry;
 
+    const gameTypeDetail = variant === 'Points' ? pointsType : variant === 'Pool' ? poolType : dealsCount;
+
     try {
       const { room, player } = await multiplayerService.findOrCreateMatch({
         variant,
+        gameTypeDetail,
         maxPlayers: playersCount,
         entryChips: entryFee,
         pointValue: currentPointVal,

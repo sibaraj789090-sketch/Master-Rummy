@@ -759,3 +759,147 @@ export function validateRummyHand(groups: PlayingCard[][], wildJokerRank: Rank):
     statusMessage,
   };
 }
+
+export interface PointsSettlement {
+  winnerId: string;
+  pointValue: number;
+  opponentsScores: Record<string, number>;
+  totalPenaltyPoints: number;
+  grossWinnings: number;
+  rakePercent: number;
+  rakeAmount: number;
+  netWinnings: number;
+}
+
+export function calculatePointsSettlement(
+  winnerId: string,
+  scores: Record<string, number>,
+  pointValue: number,
+  rakePercent: number = 3
+): PointsSettlement {
+  const opponentsScores: Record<string, number> = {};
+  let totalPenaltyPoints = 0;
+
+  for (const [userId, score] of Object.entries(scores)) {
+    if (userId !== winnerId) {
+      const penalty = Math.min(80, Math.max(0, score));
+      opponentsScores[userId] = penalty;
+      totalPenaltyPoints += penalty;
+    }
+  }
+
+  const grossWinnings = Number((totalPenaltyPoints * pointValue).toFixed(2));
+  const rakeAmount = Number(((grossWinnings * rakePercent) / 100).toFixed(2));
+  const netWinnings = Number((grossWinnings - rakeAmount).toFixed(2));
+
+  return {
+    winnerId,
+    pointValue,
+    opponentsScores,
+    totalPenaltyPoints,
+    grossWinnings,
+    rakePercent,
+    rakeAmount,
+    netWinnings,
+  };
+}
+
+export interface PoolRoundResolution {
+  newCumulativeScores: Record<string, number>;
+  eliminatedIds: string[];
+  remainingEligibleIds: string[];
+  isTableComplete: boolean;
+  tableWinnerId?: string;
+}
+
+export function resolvePoolRound(
+  currentCumulativeScores: Record<string, number>,
+  roundScores: Record<string, number>,
+  threshold: number,
+  allPlayerIds: string[]
+): PoolRoundResolution {
+  const newCumulativeScores: Record<string, number> = {};
+  const eliminatedIds: string[] = [];
+  const remainingEligibleIds: string[] = [];
+
+  for (const id of allPlayerIds) {
+    const prev = currentCumulativeScores[id] ?? 0;
+    const roundPenalty = roundScores[id] ?? 0;
+    const newTotal = prev + roundPenalty;
+    newCumulativeScores[id] = newTotal;
+
+    if (newTotal >= threshold) {
+      eliminatedIds.push(id);
+    } else {
+      remainingEligibleIds.push(id);
+    }
+  }
+
+  // Check table completion
+  let isTableComplete = false;
+  let tableWinnerId: string | undefined = undefined;
+
+  if (remainingEligibleIds.length === 1) {
+    isTableComplete = true;
+    tableWinnerId = remainingEligibleIds[0];
+  } else if (remainingEligibleIds.length === 0) {
+    // Simultaneous elimination edge case: player with lowest cumulative score wins
+    isTableComplete = true;
+    let lowestScore = Infinity;
+    for (const id of allPlayerIds) {
+      if (newCumulativeScores[id] < lowestScore) {
+        lowestScore = newCumulativeScores[id];
+        tableWinnerId = id;
+      }
+    }
+  }
+
+  return {
+    newCumulativeScores,
+    eliminatedIds,
+    remainingEligibleIds,
+    isTableComplete,
+    tableWinnerId,
+  };
+}
+
+export interface DealsRoundResolution {
+  newCumulativeScores: Record<string, number>;
+  currentDeal: number;
+  totalDeals: number;
+  isTableComplete: boolean;
+  rankedPlayerIds: string[];
+  tableWinnerId?: string;
+}
+
+export function resolveDealsRound(
+  currentCumulativeScores: Record<string, number>,
+  dealScores: Record<string, number>,
+  completedDealNumber: number,
+  totalDeals: number,
+  allPlayerIds: string[]
+): DealsRoundResolution {
+  const newCumulativeScores: Record<string, number> = {};
+
+  for (const id of allPlayerIds) {
+    const prev = currentCumulativeScores[id] ?? 0;
+    const dealPenalty = dealScores[id] ?? 0;
+    newCumulativeScores[id] = prev + dealPenalty;
+  }
+
+  const isTableComplete = completedDealNumber >= totalDeals;
+
+  // Rank players by lowest cumulative score
+  const rankedPlayerIds = [...allPlayerIds].sort((a, b) => {
+    return (newCumulativeScores[a] ?? 0) - (newCumulativeScores[b] ?? 0);
+  });
+
+  return {
+    newCumulativeScores,
+    currentDeal: completedDealNumber,
+    totalDeals,
+    isTableComplete,
+    rankedPlayerIds,
+    tableWinnerId: isTableComplete ? rankedPlayerIds[0] : undefined,
+  };
+}

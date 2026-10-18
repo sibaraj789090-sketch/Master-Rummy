@@ -8,6 +8,10 @@ import {
   autoSortHand,
   getGameModeConfig,
   calculateDropPenaltyPoints,
+  calculatePointsSettlement,
+  resolvePoolRound,
+  resolveDealsRound,
+  validateRummyHand,
 } from './rummyRules';
 import { PlayingCard, Rank } from '../types/rummy';
 
@@ -324,6 +328,271 @@ export const runRummyEngineTests = (): TestResult[] => {
     });
   } catch (err: any) {
     results.push({ name: 'Card Conservation Guarantee', passed: false, message: err.message });
+  }
+
+  // Test 14: Points Rummy Settlement and Scoring Calculation
+  try {
+    const winnerId = 'user_win';
+    const scores = {
+      user_win: 0,
+      user_opp1: 35,
+      user_opp2: 80, // max penalty
+      user_opp3: 20, // first drop
+    };
+    const pointVal = 2; // ₹2/point
+    const settlement = calculatePointsSettlement(winnerId, scores, pointVal, 3);
+    const expectedGross = (35 + 80 + 20) * 2; // 135 * 2 = 270
+    const expectedRake = Number(((270 * 3) / 100).toFixed(2)); // 8.1
+    const expectedNet = Number((270 - 8.1).toFixed(2)); // 261.9
+
+    const passed =
+      settlement.totalPenaltyPoints === 135 &&
+      settlement.grossWinnings === expectedGross &&
+      settlement.rakeAmount === expectedRake &&
+      settlement.netWinnings === expectedNet;
+
+    results.push({
+      name: 'Points Rummy Settlement & Penalty Scoring',
+      passed,
+      message: passed
+        ? `Settlement verified: Gross ₹${expectedGross}, Rake ₹${expectedRake}, Net ₹${expectedNet}.`
+        : `Settlement mismatch: got ${JSON.stringify(settlement)}`,
+    });
+  } catch (err: any) {
+    results.push({ name: 'Points Rummy Settlement', passed: false, message: err.message });
+  }
+
+  // Test 15: 101 Pool Rummy Multi-Round Elimination & Survivor
+  try {
+    const allPlayers = ['p1', 'p2', 'p3'];
+    // Round 1: p1 wins (0), p2 gets 40, p3 gets 70
+    const r1 = resolvePoolRound({ p1: 0, p2: 0, p3: 0 }, { p1: 0, p2: 40, p3: 70 }, 101, allPlayers);
+    // Round 2: p2 wins (0), p1 gets 30, p3 gets 35 (70 + 35 = 105 -> ELIMINATED)
+    const r2 = resolvePoolRound(r1.newCumulativeScores, { p1: 30, p2: 0, p3: 35 }, 101, allPlayers);
+    // Round 3: p1 wins (0), p2 gets 65 (40 + 0 + 65 = 105 -> ELIMINATED). Only p1 survives!
+    const r3 = resolvePoolRound(r2.newCumulativeScores, { p1: 0, p2: 65, p3: 0 }, 101, allPlayers);
+
+    const passed =
+      r1.eliminatedIds.length === 0 &&
+      r2.eliminatedIds.includes('p3') &&
+      r2.remainingEligibleIds.length === 2 &&
+      r3.isTableComplete === true &&
+      r3.tableWinnerId === 'p1' &&
+      r3.newCumulativeScores.p1 === 30 &&
+      r3.newCumulativeScores.p2 === 105 &&
+      r3.newCumulativeScores.p3 === 105;
+
+    results.push({
+      name: '101 Pool Rummy Multi-Round Elimination & Survivor Determination',
+      passed,
+      message: passed
+        ? 'Successfully tracked 3 rounds, eliminated p3 (105) and p2 (105), crowned p1 (30 pts).'
+        : 'Failed 101 Pool resolution test.',
+    });
+  } catch (err: any) {
+    results.push({ name: '101 Pool Elimination', passed: false, message: err.message });
+  }
+
+  // Test 16: 201 Pool Rummy Multi-Round Elimination & Rules
+  try {
+    const allPlayers = ['p1', 'p2'];
+    // Round 1: p1 wins (0), p2 middle drops (50 pts in 201 Pool)
+    const r1 = resolvePoolRound({ p1: 0, p2: 0 }, { p1: 0, p2: 50 }, 201, allPlayers);
+    // Round 2: p1 gets 75, p2 gets 80 (p2 cumul = 130)
+    const r2 = resolvePoolRound(r1.newCumulativeScores, { p1: 75, p2: 80 }, 201, allPlayers);
+    // Round 3: p1 wins (0), p2 gets 75 (130 + 75 = 205 -> ELIMINATED)
+    const r3 = resolvePoolRound(r2.newCumulativeScores, { p1: 0, p2: 75 }, 201, allPlayers);
+
+    const passed =
+      r2.newCumulativeScores.p2 === 130 &&
+      !r2.isTableComplete &&
+      r3.isTableComplete &&
+      r3.tableWinnerId === 'p1' &&
+      r3.newCumulativeScores.p2 === 205;
+
+    results.push({
+      name: '201 Pool Rummy 201-Threshold & 50-Mid-Drop Elimination',
+      passed,
+      message: passed
+        ? '201 Pool threshold enforced properly; eliminated p2 at 205 pts, crowned p1.'
+        : 'Failed 201 Pool test.',
+    });
+  } catch (err: any) {
+    results.push({ name: '201 Pool Elimination', passed: false, message: err.message });
+  }
+
+  // Test 17: Deals Rummy (2 Deals) Complete Simulation
+  try {
+    const players = ['alice', 'bob', 'charlie'];
+    // Deal 1: alice wins (0), bob gets 25, charlie gets 40
+    const d1 = resolveDealsRound({ alice: 0, bob: 0, charlie: 0 }, { alice: 0, bob: 25, charlie: 40 }, 1, 2, players);
+    // Deal 2: bob wins (0), alice gets 15, charlie gets 10
+    const d2 = resolveDealsRound(d1.newCumulativeScores, { alice: 15, bob: 0, charlie: 10 }, 2, 2, players);
+
+    // Cumulative totals: alice = 15, bob = 25, charlie = 50.
+    // Lowest score wins -> alice!
+    const passed =
+      !d1.isTableComplete &&
+      d2.isTableComplete &&
+      d2.tableWinnerId === 'alice' &&
+      d2.newCumulativeScores.alice === 15 &&
+      d2.newCumulativeScores.bob === 25 &&
+      d2.newCumulativeScores.charlie === 50 &&
+      d2.rankedPlayerIds[0] === 'alice';
+
+    results.push({
+      name: '2 Deals Rummy Full Progression & Standings (Lowest Score Wins)',
+      passed,
+      message: passed
+        ? 'Deal 1 & 2 completed; lowest score Alice (15 pts) ranked #1 and won.'
+        : 'Failed 2 Deals simulation.',
+    });
+  } catch (err: any) {
+    results.push({ name: '2 Deals Rummy', passed: false, message: err.message });
+  }
+
+  // Test 18: Deals Rummy (3 Deals) Complete Simulation
+  try {
+    const players = ['user', 'bot1'];
+    // Deal 1: user 0, bot1 40
+    const d1 = resolveDealsRound({ user: 0, bot1: 0 }, { user: 0, bot1: 40 }, 1, 3, players);
+    // Deal 2: user 30, bot1 0
+    const d2 = resolveDealsRound(d1.newCumulativeScores, { user: 30, bot1: 0 }, 2, 3, players);
+    // Deal 3: user 10, bot1 25 -> Final: user = 40, bot1 = 65 -> user wins!
+    const d3 = resolveDealsRound(d2.newCumulativeScores, { user: 10, bot1: 25 }, 3, 3, players);
+
+    const passed =
+      !d1.isTableComplete &&
+      !d2.isTableComplete &&
+      d3.isTableComplete &&
+      d3.tableWinnerId === 'user' &&
+      d3.newCumulativeScores.user === 40 &&
+      d3.newCumulativeScores.bot1 === 65;
+
+    results.push({
+      name: '3 Deals Rummy Full Progression & Standings (Lowest Score Wins)',
+      passed,
+      message: passed
+        ? 'Completed 3 deals; user cumulative 40 pts defeated bot1 65 pts.'
+        : 'Failed 3 Deals simulation.',
+    });
+  } catch (err: any) {
+    results.push({ name: '3 Deals Rummy', passed: false, message: err.message });
+  }
+
+  // Test 19: Strict Rummy Hand Declaration Validation & Rejection
+  try {
+    const wildJokerRank: Rank = '9';
+    // Case A: Missing Pure Sequence (has impure sequence + sets, but NO pure sequence)
+    const invalidNoPure: PlayingCard[][] = [
+      // Impure sequence using wild joker 9♣
+      [
+        { id: 'a1', rank: '4', suit: 'hearts', value: 4, points: 4 },
+        { id: 'a2', rank: '9', suit: 'clubs', value: 9, points: 9, isJoker: true },
+        { id: 'a3', rank: '6', suit: 'hearts', value: 6, points: 6 },
+      ],
+      // Set
+      [
+        { id: 'a4', rank: 'K', suit: 'spades', value: 13, points: 10 },
+        { id: 'a5', rank: 'K', suit: 'hearts', value: 13, points: 10 },
+        { id: 'a6', rank: 'K', suit: 'diamonds', value: 13, points: 10 },
+      ],
+      // Set
+      [
+        { id: 'a7', rank: '7', suit: 'spades', value: 7, points: 7 },
+        { id: 'a8', rank: '7', suit: 'hearts', value: 7, points: 7 },
+        { id: 'a9', rank: '7', suit: 'diamonds', value: 7, points: 7 },
+      ],
+      // Set of 4
+      [
+        { id: 'a10', rank: '2', suit: 'spades', value: 2, points: 2 },
+        { id: 'a11', rank: '2', suit: 'hearts', value: 2, points: 2 },
+        { id: 'a12', rank: '2', suit: 'diamonds', value: 2, points: 2 },
+        { id: 'a13', rank: '2', suit: 'clubs', value: 2, points: 2 },
+      ],
+    ];
+
+    const valNoPure = validateRummyHand(invalidNoPure, wildJokerRank);
+
+    // Case B: Has Pure Sequence, but total sequences < 2 (only 1 pure sequence + 3 sets)
+    const invalidOneSeq: PlayingCard[][] = [
+      // Pure sequence
+      [
+        { id: 'b1', rank: '4', suit: 'spades', value: 4, points: 4 },
+        { id: 'b2', rank: '5', suit: 'spades', value: 5, points: 5 },
+        { id: 'b3', rank: '6', suit: 'spades', value: 6, points: 6 },
+      ],
+      // Set 1
+      [
+        { id: 'b4', rank: 'K', suit: 'spades', value: 13, points: 10 },
+        { id: 'b5', rank: 'K', suit: 'hearts', value: 13, points: 10 },
+        { id: 'b6', rank: 'K', suit: 'diamonds', value: 13, points: 10 },
+      ],
+      // Set 2
+      [
+        { id: 'b7', rank: '7', suit: 'spades', value: 7, points: 7 },
+        { id: 'b8', rank: '7', suit: 'hearts', value: 7, points: 7 },
+        { id: 'b9', rank: '7', suit: 'diamonds', value: 7, points: 7 },
+      ],
+      // Set 3 (4 cards)
+      [
+        { id: 'b10', rank: '2', suit: 'spades', value: 2, points: 2 },
+        { id: 'b11', rank: '2', suit: 'hearts', value: 2, points: 2 },
+        { id: 'b12', rank: '2', suit: 'diamonds', value: 2, points: 2 },
+        { id: 'b13', rank: '2', suit: 'clubs', value: 2, points: 2 },
+      ],
+    ];
+
+    const valOneSeq = validateRummyHand(invalidOneSeq, wildJokerRank);
+
+    // Case C: Valid Declaration (Pure Seq + Impure Seq + 2 Sets = 13 cards)
+    const validHand: PlayingCard[][] = [
+      // Pure Seq: 4♠ 5♠ 6♠
+      [
+        { id: 'c1', rank: '4', suit: 'spades', value: 4, points: 4 },
+        { id: 'c2', rank: '5', suit: 'spades', value: 5, points: 5 },
+        { id: 'c3', rank: '6', suit: 'spades', value: 6, points: 6 },
+      ],
+      // Impure Seq: 8♥ + [9♣ Joker] + 10♥
+      [
+        { id: 'c4', rank: '8', suit: 'hearts', value: 8, points: 8 },
+        { id: 'c5', rank: '9', suit: 'clubs', value: 9, points: 9, isJoker: true },
+        { id: 'c6', rank: '10', suit: 'hearts', value: 10, points: 10 },
+      ],
+      // Set: 7♠ 7♥ 7♦
+      [
+        { id: 'c7', rank: '7', suit: 'spades', value: 7, points: 7 },
+        { id: 'c8', rank: '7', suit: 'hearts', value: 7, points: 7 },
+        { id: 'c9', rank: '7', suit: 'diamonds', value: 7, points: 7 },
+      ],
+      // Set: 2♠ 2♥ 2♦ 2♣
+      [
+        { id: 'c10', rank: '2', suit: 'spades', value: 2, points: 2 },
+        { id: 'c11', rank: '2', suit: 'hearts', value: 2, points: 2 },
+        { id: 'c12', rank: '2', suit: 'diamonds', value: 2, points: 2 },
+        { id: 'c13', rank: '2', suit: 'clubs', value: 2, points: 2 },
+      ],
+    ];
+
+    const valValid = validateRummyHand(validHand, wildJokerRank);
+
+    const passed =
+      !valNoPure.isValidDeclaration &&
+      valNoPure.statusMessage.includes('Pure Sequence') &&
+      !valOneSeq.isValidDeclaration &&
+      valOneSeq.statusMessage.includes('2 Sequences') &&
+      valValid.isValidDeclaration &&
+      valValid.totalPoints === 0;
+
+    results.push({
+      name: 'Authoritative Hand Validation (Pure Seq & Min 2 Sequences Enforced)',
+      passed,
+      message: passed
+        ? 'Correctly rejected hands missing pure sequence or second sequence, and accepted valid show with 0 points.'
+        : 'Declaration validation failure.',
+    });
+  } catch (err: any) {
+    results.push({ name: 'Hand Validation Enforced', passed: false, message: err.message });
   }
 
   return results;
