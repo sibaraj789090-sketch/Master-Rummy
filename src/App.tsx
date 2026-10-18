@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { RummyProvider, useRummy } from './context/RummyContext';
 import { TopHeader } from './components/mobile/TopHeader';
 import { BottomNav } from './components/mobile/BottomNav';
@@ -21,14 +21,24 @@ import { RummyTable } from './components/game/RummyTable';
 import { AdminPanel } from './components/admin/AdminPanel';
 import { sounds } from './utils/sound';
 
+const isCurrentPathAdmin = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  const path = window.location.pathname.toLowerCase();
+  return path === '/admin' || path.startsWith('/admin/');
+};
+
 const MainApp: React.FC = () => {
   const { activeScreen, setActiveScreen, activeGameConfig } = useRummy();
 
-  // Root view: 'PLAYER' or 'ADMIN'
-  const [viewMode, setViewMode] = useState<'PLAYER' | 'ADMIN'>('PLAYER');
+  // Root view: 'PLAYER' or 'ADMIN' based on /admin URL path
+  const [viewMode, setViewMode] = useState<'PLAYER' | 'ADMIN'>(() => {
+    return isCurrentPathAdmin() ? 'ADMIN' : 'PLAYER';
+  });
 
-  // App opening loading page splash screen state
-  const [isLoadingScreen, setIsLoadingScreen] = useState<boolean>(true);
+  // App opening loading page splash screen state (bypassed on /admin route for fast admin access)
+  const [isLoadingScreen, setIsLoadingScreen] = useState<boolean>(() => {
+    return !isCurrentPathAdmin();
+  });
 
   // Modals state
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -43,9 +53,39 @@ const MainApp: React.FC = () => {
   const [isSupabaseSetupOpen, setIsSupabaseSetupOpen] = useState(false);
   const [isDocumentsVerificationOpen, setIsDocumentsVerificationOpen] = useState(false);
 
+  // Sync state with browser location and forward/back navigation
+  useEffect(() => {
+    const handleLocationChange = () => {
+      if (isCurrentPathAdmin()) {
+        setViewMode('ADMIN');
+        setIsLoadingScreen(false);
+      } else {
+        setViewMode('PLAYER');
+      }
+    };
+
+    window.addEventListener('popstate', handleLocationChange);
+    return () => window.removeEventListener('popstate', handleLocationChange);
+  }, []);
+
+  const handleSwitchToPlayer = () => {
+    if (typeof window !== 'undefined' && isCurrentPathAdmin()) {
+      window.history.pushState(null, '', '/');
+    }
+    setViewMode('PLAYER');
+  };
+
+  const handleSwitchToAdmin = () => {
+    if (typeof window !== 'undefined' && !isCurrentPathAdmin()) {
+      window.history.pushState(null, '', '/admin');
+    }
+    setViewMode('ADMIN');
+    setIsLoadingScreen(false);
+  };
+
   // If in Admin Mode, show Admin Panel
   if (viewMode === 'ADMIN') {
-    return <AdminPanel onSwitchToPlayer={() => setViewMode('PLAYER')} />;
+    return <AdminPanel onSwitchToPlayer={handleSwitchToPlayer} />;
   }
 
   // If game is active
@@ -95,7 +135,7 @@ const MainApp: React.FC = () => {
           onOpenTransactions={() => setIsTransactionsOpen(true)}
           onOpenSupport={() => setIsSupportOpen(true)}
           onOpenLogin={() => setIsLoginOpen(true)}
-          onOpenAdmin={() => setViewMode('ADMIN')}
+          onOpenAdmin={handleSwitchToAdmin}
           onOpenInstall={() => setIsInstallOpen(true)}
           onOpenLoadingScreen={() => setIsLoadingScreen(true)}
           onOpenSupabaseSetup={() => setIsSupabaseSetupOpen(true)}

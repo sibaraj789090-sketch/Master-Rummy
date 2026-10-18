@@ -337,8 +337,16 @@ export const AUTHORIZED_ADMIN_EMAILS = [
 export const checkIsUserAdmin = async (user?: SupabaseAuthUser | null): Promise<boolean> => {
   const activeUser = user || getSavedAuthUser();
 
-  // 1. Check verified admin emails
-  if (activeUser?.email && AUTHORIZED_ADMIN_EMAILS.includes(activeUser.email.toLowerCase().trim())) {
+  // 1. Check verified admin emails (built-in + env + custom stored)
+  const customEmail = typeof window !== 'undefined' ? localStorage.getItem('master_rummy_admin_custom_email')?.toLowerCase() : null;
+  const envEmail = (import.meta as any).env?.VITE_ADMIN_EMAIL?.toLowerCase();
+  const allAuthorizedEmails = [
+    ...AUTHORIZED_ADMIN_EMAILS.map((e) => e.toLowerCase()),
+    ...(customEmail ? [customEmail] : []),
+    ...(envEmail ? [envEmail] : []),
+  ];
+
+  if (activeUser?.email && (allAuthorizedEmails.includes(activeUser.email.toLowerCase().trim()) || activeUser.email.endsWith('@masterrummy.internal'))) {
     return true;
   }
 
@@ -358,10 +366,11 @@ export const checkIsUserAdmin = async (user?: SupabaseAuthUser | null): Promise<
     } catch {}
   }
 
-  // 3. Check session storage for verified admin token
+  // 3. Check session/local storage for verified admin token (preserves session across page refresh)
   if (typeof window !== 'undefined') {
-    const adminToken = sessionStorage.getItem('master_rummy_admin_verified');
-    if (adminToken === 'true') {
+    const adminSessionToken = sessionStorage.getItem('master_rummy_admin_verified');
+    const adminLocalToken = localStorage.getItem('master_rummy_admin_verified');
+    if (adminSessionToken === 'true' || adminLocalToken === 'true') {
       return true;
     }
   }
@@ -376,10 +385,26 @@ export const verifyAdminCredentials = async (
   const cleanEmail = email.trim().toLowerCase();
   const cleanKey = secretKey.trim();
 
+  const customEmail = typeof window !== 'undefined' ? localStorage.getItem('master_rummy_admin_custom_email')?.toLowerCase() : null;
+  const customKey = typeof window !== 'undefined' ? localStorage.getItem('master_rummy_admin_custom_key') : null;
+  const envEmail = (import.meta as any).env?.VITE_ADMIN_EMAIL?.toLowerCase();
+  const envKey = (import.meta as any).env?.VITE_ADMIN_PASSWORD;
+
+  const allAuthorizedEmails = [
+    ...AUTHORIZED_ADMIN_EMAILS.map((e) => e.toLowerCase()),
+    ...(customEmail ? [customEmail] : []),
+    ...(envEmail ? [envEmail] : []),
+  ];
+
   const isAuthorizedEmail =
-    AUTHORIZED_ADMIN_EMAILS.includes(cleanEmail) || cleanEmail.endsWith('@masterrummy.internal');
+    allAuthorizedEmails.includes(cleanEmail) || cleanEmail.endsWith('@masterrummy.internal');
+
   const isValidAdminKey =
-    cleanKey === 'MasterAdmin@2026' || cleanKey === 'AdminPass@611' || cleanKey === 'admin123';
+    cleanKey === 'MasterAdmin@2026' ||
+    cleanKey === 'AdminPass@611' ||
+    cleanKey === 'admin123' ||
+    (customKey && cleanKey === customKey) ||
+    (envKey && cleanKey === envKey);
 
   if (!isAuthorizedEmail) {
     return {
@@ -398,15 +423,37 @@ export const verifyAdminCredentials = async (
   if (typeof window !== 'undefined') {
     sessionStorage.setItem('master_rummy_admin_verified', 'true');
     sessionStorage.setItem('master_rummy_admin_email', cleanEmail);
+    localStorage.setItem('master_rummy_admin_verified', 'true');
+    localStorage.setItem('master_rummy_admin_email', cleanEmail);
   }
 
   return { success: true };
+};
+
+export const setCustomAdminCredentials = (email: string, passwordOrKey: string) => {
+  if (typeof window !== 'undefined') {
+    localStorage.setItem('master_rummy_admin_custom_email', email.trim().toLowerCase());
+    localStorage.setItem('master_rummy_admin_custom_key', passwordOrKey.trim());
+  }
+};
+
+export const getCustomAdminCredentials = () => {
+  if (typeof window !== 'undefined') {
+    return {
+      customEmail: localStorage.getItem('master_rummy_admin_custom_email') || '',
+      hasCustomKey: Boolean(localStorage.getItem('master_rummy_admin_custom_key')),
+    };
+  }
+  return { customEmail: '', hasCustomKey: false };
 };
 
 export const revokeAdminAccess = () => {
   if (typeof window !== 'undefined') {
     sessionStorage.removeItem('master_rummy_admin_verified');
     sessionStorage.removeItem('master_rummy_admin_email');
+    localStorage.removeItem('master_rummy_admin_verified');
+    localStorage.removeItem('master_rummy_admin_email');
   }
 };
+
 

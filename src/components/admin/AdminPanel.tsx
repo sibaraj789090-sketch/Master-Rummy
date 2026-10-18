@@ -49,6 +49,9 @@ import { sounds } from '../../utils/sound';
 import {
   supabase,
   verifyAdminCredentials,
+  revokeAdminAccess,
+  getCustomAdminCredentials,
+  setCustomAdminCredentials,
   getSupabaseConfig,
   saveSupabaseConfig,
   clearSupabaseConfig,
@@ -140,7 +143,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onSwitchToPlayer }) => {
           >
             <div>
               <label className="text-[10px] uppercase font-bold text-stone-400 block mb-1">
-                Admin Email (e.g. ranidas784170@gmail.com)
+                Admin Gmail / Email
               </label>
               <input
                 type="email"
@@ -148,13 +151,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onSwitchToPlayer }) => {
                 onChange={(e) => setAuthAdminEmail(e.target.value)}
                 placeholder="admin@masterrummy.com"
                 required
-                className="w-full bg-stone-950 border border-stone-700 rounded-xl px-3 py-2.5 text-xs text-stone-100 focus:outline-hidden focus:border-amber-400"
+                className="w-full bg-stone-950 border border-stone-700 rounded-xl px-3 py-2.5 text-xs text-stone-100 focus:outline-hidden focus:border-amber-400 font-mono"
               />
             </div>
 
             <div>
               <label className="text-[10px] uppercase font-bold text-stone-400 block mb-1">
-                Security Key
+                Admin Password / Security Key
               </label>
               <input
                 type="password"
@@ -165,7 +168,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onSwitchToPlayer }) => {
                 className="w-full bg-stone-950 border border-stone-700 rounded-xl px-3 py-2.5 text-xs text-stone-100 focus:outline-hidden focus:border-amber-400 font-mono"
               />
               <span className="text-[10px] text-stone-500 mt-1 block">
-                Authorized Keys: MasterAdmin@2026, AdminPass@611, admin123
+                Authorized Keys: MasterAdmin@2026, AdminPass@611, admin123 (or your custom password)
               </span>
             </div>
 
@@ -264,6 +267,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onSwitchToPlayer }) => {
   const [referralBonusVal, setReferralBonusVal] = useState(adminSettings.referralBonus);
   const [maintenanceModeVal, setMaintenanceModeVal] = useState(adminSettings.maintenanceMode);
   const [broadcastText, setBroadcastText] = useState('');
+  const [customGmailInput, setCustomGmailInput] = useState(() => getCustomAdminCredentials().customEmail);
+  const [customPasswordInput, setCustomPasswordInput] = useState('');
+  const [customCredsSaved, setCustomCredsSaved] = useState(false);
 
   // Tournaments & Coupons
   const [newTourTitle, setNewTourTitle] = useState('');
@@ -426,6 +432,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onSwitchToPlayer }) => {
             <span className="text-stone-400">House Rake:</span>
             <span className="font-mono font-bold text-amber-300">{adminSettings.houseRakePercent}%</span>
           </div>
+
+          {/* Log Out Admin */}
+          <button
+            onClick={async () => {
+              sounds.playCardClick();
+              revokeAdminAccess();
+              await checkAdminPermissions();
+            }}
+            title="Securely log out of Admin Console"
+            className="flex items-center gap-1.5 bg-stone-800 hover:bg-stone-700 text-stone-300 hover:text-white font-bold text-xs px-3 py-2 rounded-xl shadow-md border border-stone-700 active:scale-95 transition-all"
+          >
+            <Lock className="w-3.5 h-3.5 text-amber-400" />
+            <span>LOG OUT</span>
+          </button>
 
           <button
             onClick={() => {
@@ -2641,6 +2661,91 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onSwitchToPlayer }) => {
                 >
                   Send Push Broadcast to Players
                 </button>
+              </div>
+            </div>
+
+            {/* Admin Authentication & Security Credentials Configuration */}
+            <div className="bg-stone-900 border border-stone-800 rounded-2xl p-5 shadow-sm space-y-4 md:col-span-2">
+              <h3 className="font-extrabold text-sm text-white flex items-center justify-between pb-2 border-b border-stone-800">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-amber-400" />
+                  <span>Admin Route & Security Credentials (https://cardingx.in/admin)</span>
+                </div>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-mono font-bold border border-emerald-500/30">
+                  ROUTE: /admin ACTIVE
+                </span>
+              </h3>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                <div className="space-y-3">
+                  <p className="text-stone-300 leading-relaxed">
+                    The Admin Panel is accessible directly at <strong className="text-amber-400 font-mono">/admin</strong> (or <strong className="text-amber-400 font-mono">https://cardingx.in/admin</strong> after Vercel deployment). Only authorized admins can log in and manage the database, wallets, users, and games.
+                  </p>
+
+                  <div className="p-3 rounded-xl bg-stone-950 border border-stone-800 space-y-1.5 font-mono text-[11px]">
+                    <div className="text-stone-400">Current Built-in Authorized Emails:</div>
+                    <div className="text-amber-300 font-bold">{AUTHORIZED_ADMIN_EMAILS.join(', ')}</div>
+                    <div className="text-stone-400 mt-2">Active Admin Session:</div>
+                    <div className="text-emerald-400 font-bold">
+                      {typeof window !== 'undefined' ? sessionStorage.getItem('master_rummy_admin_email') || 'admin@masterrummy.com' : 'admin'}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-3 bg-stone-950/60 p-4 rounded-xl border border-stone-800">
+                  <h4 className="font-bold text-white text-xs flex items-center gap-1.5">
+                    <Lock className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Set Custom Admin Gmail & Password</span>
+                  </h4>
+
+                  <div>
+                    <label className="text-stone-400 block mb-1 font-bold text-[11px]">Admin Gmail Address</label>
+                    <input
+                      type="email"
+                      value={customGmailInput}
+                      onChange={(e) => setCustomGmailInput(e.target.value)}
+                      placeholder="e.g. yourname@gmail.com"
+                      className="w-full bg-stone-900 border border-stone-700 rounded-xl px-3 py-2 text-stone-100 font-mono text-xs focus:outline-hidden focus:border-amber-400"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-stone-400 block mb-1 font-bold text-[11px]">Admin Security Password / Key</label>
+                    <input
+                      type="password"
+                      value={customPasswordInput}
+                      onChange={(e) => setCustomPasswordInput(e.target.value)}
+                      placeholder="Enter new password (or leave blank to keep default)"
+                      className="w-full bg-stone-900 border border-stone-700 rounded-xl px-3 py-2 text-stone-100 font-mono text-xs focus:outline-hidden focus:border-amber-400"
+                    />
+                  </div>
+
+                  {customCredsSaved && (
+                    <div className="p-2 rounded-lg bg-emerald-950/60 border border-emerald-500/40 text-emerald-300 text-xs flex items-center gap-1.5">
+                      <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                      <span>Custom Admin credentials successfully updated!</span>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={() => {
+                      if (!customGmailInput.trim()) {
+                        alert('Please enter a valid Gmail address');
+                        return;
+                      }
+                      sounds.playCoinSound();
+                      setCustomAdminCredentials(
+                        customGmailInput.trim(),
+                        customPasswordInput.trim() || 'MasterAdmin@2026'
+                      );
+                      setCustomCredsSaved(true);
+                      setTimeout(() => setCustomCredsSaved(false), 3000);
+                    }}
+                    className="w-full py-2 bg-gradient-to-r from-amber-500 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 text-stone-950 font-black text-xs uppercase rounded-xl shadow-md transition-all active:scale-95"
+                  >
+                    Save Custom Admin Gmail & Password
+                  </button>
+                </div>
               </div>
             </div>
           </div>
