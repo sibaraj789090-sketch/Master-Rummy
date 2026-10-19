@@ -8,6 +8,7 @@ interface WithdrawalModalProps {
   onClose: () => void;
   onOpenSupport: () => void;
   onOpenDocumentsVerification?: () => void;
+  onOpenAddCash?: () => void;
 }
 
 export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
@@ -15,6 +16,7 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
   onClose,
   onOpenSupport,
   onOpenDocumentsVerification,
+  onOpenAddCash,
 }) => {
   const { currentUser, requestWithdrawal, withdrawalRequests, adminSettings } = useRummy();
 
@@ -25,9 +27,11 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
 
   // Bank Form Details
   const [bankName, setBankName] = useState('HDFC Bank');
-  const [accountNumber, setAccountNumber] = useState('50100492837123');
-  const [ifsc, setIfsc] = useState('HDFC0000123');
-  const [accountHolder, setAccountHolder] = useState('Rani Siba');
+  const [accountNumber, setAccountNumber] = useState('');
+  const [ifsc, setIfsc] = useState('');
+  const [accountHolder, setAccountHolder] = useState(
+    currentUser.username && currentUser.username !== 'Guest Player' ? currentUser.username : ''
+  );
 
   const [showBankForm, setShowBankForm] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -36,6 +40,7 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
   if (!isOpen) return null;
 
   const isKycApproved = currentUser.isKycVerified || currentUser.kycDetails?.overallStatus === 'VERIFIED';
+  const hasCompletedMinDeposit = Boolean(currentUser.hasDeposited && (currentUser.totalDeposited || 0) >= 100);
 
   const tds = Math.round(selectedAmount * 0.05);
   const netAmount = selectedAmount - tds;
@@ -46,11 +51,16 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
     setSuccessMessage('');
 
     if (!isKycApproved) {
-      setErrorMessage('⚠️ 18+ Documents Verification Required! You must upload and verify your Aadhaar Card & PAN Card before withdrawing.');
+      setErrorMessage('⚠️ 18+ KYC Verification Required! You must complete and have your Aadhaar Card & PAN Card approved before withdrawing.');
       return;
     }
 
-    if (!accountNumber || !ifsc || !accountHolder) {
+    if (!hasCompletedMinDeposit) {
+      setErrorMessage('⚠️ Minimum Deposit Required! You must complete at least one minimum deposit of ₹100 before withdrawing.');
+      return;
+    }
+
+    if (!accountNumber.trim() || !ifsc.trim() || !accountHolder.trim()) {
       setErrorMessage('Please fill in complete bank account details');
       return;
     }
@@ -147,11 +157,11 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
                   <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
                   <div>
                     <div className="flex items-center gap-1.5">
-                      <span className="bg-red-700 text-white font-black text-[9px] px-1 py-0.2 rounded">18+</span>
-                      <span className="font-black text-xs text-amber-900">Aadhaar & PAN Verification Required</span>
+                      <span className="bg-red-700 text-white font-black text-[9px] px-1 py-0.2 rounded">STEP 1</span>
+                      <span className="font-black text-xs text-amber-900">18+ KYC Documents Verification Required</span>
                     </div>
                     <p className="text-[11px] text-amber-800 mt-0.5 leading-snug">
-                      Government guidelines require 18+ Aadhaar & PAN Card verification to withdraw cash.
+                      Government guidelines require Aadhaar & PAN Card verification before bank withdrawals.
                     </p>
                   </div>
                 </div>
@@ -163,7 +173,7 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
                     }}
                     className="shrink-0 bg-red-700 hover:bg-red-800 text-white text-[10px] font-black px-2.5 py-1.5 rounded-lg uppercase shadow-xs transition-colors"
                   >
-                    Upload Now ›
+                    Verify KYC ›
                   </button>
                 )}
               </div>
@@ -172,7 +182,7 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
                 <div className="flex items-center gap-2">
                   <ShieldCheck className="w-4 h-4 text-emerald-600" />
                   <span className="text-xs font-bold text-emerald-900">
-                    18+ KYC Documents Verified (Aadhaar & PAN Approved)
+                    Step 1: 18+ KYC Verified (Aadhaar & PAN Approved)
                   </span>
                 </div>
                 {onOpenDocumentsVerification && (
@@ -186,6 +196,44 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
                     View Docs
                   </button>
                 )}
+              </div>
+            )}
+
+            {/* Minimum Deposit Verification Banner (User rule: kyc + minimum deposit required) */}
+            {!hasCompletedMinDeposit ? (
+              <div className="bg-amber-50 border border-amber-300 rounded-xl p-3 flex items-start justify-between gap-2.5 shadow-xs">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="bg-amber-600 text-white font-black text-[9px] px-1 py-0.2 rounded">STEP 2</span>
+                      <span className="font-black text-xs text-amber-900">Minimum Deposit Required (₹100)</span>
+                    </div>
+                    <p className="text-[11px] text-amber-800 mt-0.5 leading-snug">
+                      To activate bank payouts and verify your payment account, at least one minimum deposit of ₹100 is required.
+                    </p>
+                  </div>
+                </div>
+                {onOpenAddCash && (
+                  <button
+                    onClick={() => {
+                      sounds.playCoinSound();
+                      onOpenAddCash();
+                    }}
+                    className="shrink-0 bg-emerald-700 hover:bg-emerald-800 text-white text-[10px] font-black px-2.5 py-1.5 rounded-lg uppercase shadow-xs transition-colors"
+                  >
+                    + Deposit ₹100 ›
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="bg-emerald-50 border border-emerald-300 rounded-xl p-2.5 flex items-center justify-between shadow-xs">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                  <span className="text-xs font-bold text-emerald-900">
+                    Step 2: Minimum Deposit Verified (Total Deposited: ₹{currentUser.totalDeposited || 100})
+                  </span>
+                </div>
               </div>
             )}
 

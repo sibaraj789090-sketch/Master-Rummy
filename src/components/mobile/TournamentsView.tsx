@@ -23,7 +23,10 @@ export const TournamentsView: React.FC = () => {
   const [sortBy, setSortBy] = useState<'START' | 'ENTRY_ASC' | 'PRIZE_DESC'>('START');
   const [joinMessage, setJoinMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
-  const totalBalance = currentUser.depositBalance + currentUser.withdrawalBalance;
+  const totalBalance =
+    currentUser.depositBalance +
+    currentUser.withdrawalBalance +
+    (currentUser.bonusBalance || 0);
 
   // Filter tournaments
   const filteredTournaments = tournaments.filter((t) => {
@@ -57,6 +60,16 @@ export const TournamentsView: React.FC = () => {
   });
 
   const handleJoin = (id: string, title: string, fee: number) => {
+    if (!currentUser.isRegistered) {
+      sounds.playCardClick();
+      setJoinMessage({
+        text: 'Sign Up Required: Please create your account first to join tournaments and claim your ₹50 Welcome Bonus!',
+        type: 'error',
+      });
+      setTimeout(() => setJoinMessage(null), 5000);
+      return;
+    }
+
     if (totalBalance < fee) {
       sounds.playCardClick();
       setJoinMessage({

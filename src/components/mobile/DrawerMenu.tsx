@@ -116,20 +116,30 @@ export const DrawerMenu: React.FC<DrawerMenuProps> = ({
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1.5">
-                <h3 className="font-extrabold text-sm text-white tracking-wide truncate">{currentUser.username}</h3>
+                <h3 className="font-extrabold text-sm text-white tracking-wide truncate">
+                  {!currentUser.isRegistered ? 'Guest User' : currentUser.username}
+                </h3>
                 <span className="bg-red-700 text-white font-black text-[9px] px-1 py-0.2 rounded-sm shrink-0">
                   18+
                 </span>
               </div>
               <div className="flex items-center gap-1.5 mt-0.5">
-                {currentUser.whatsappNumber && (
-                  <span className="text-[10px] text-emerald-400 font-bold flex items-center gap-0.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> WhatsApp
+                {!currentUser.isRegistered ? (
+                  <span className="text-[10px] text-amber-300 font-bold">
+                    ₹50 Welcome Bonus Ready
                   </span>
+                ) : (
+                  <>
+                    {currentUser.whatsappNumber && (
+                      <span className="text-[10px] text-emerald-400 font-bold flex items-center gap-0.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> WhatsApp
+                      </span>
+                    )}
+                    <span className="text-[10px] text-stone-300">
+                      {currentUser.isKycVerified ? 'KYC Verified' : 'KYC Pending'}
+                    </span>
+                  </>
                 )}
-                <span className="text-[10px] text-stone-300">
-                  {currentUser.isKycVerified ? 'KYC Verified' : 'KYC Pending'}
-                </span>
               </div>
               <div className="flex items-center gap-2 mt-1">
                 <div className="flex items-center gap-1 bg-black/40 px-2 py-0.5 rounded-full border border-amber-400/30 text-xs">
@@ -137,23 +147,56 @@ export const DrawerMenu: React.FC<DrawerMenuProps> = ({
                     ₹
                   </span>
                   <span className="font-bold text-amber-300">
-                    {(currentUser.depositBalance + currentUser.withdrawalBalance).toFixed(2)}
+                    {(currentUser.depositBalance + currentUser.withdrawalBalance + (currentUser.bonusBalance || 0)).toFixed(2)}
                   </span>
                 </div>
-                <button
-                  onClick={() => {
-                    sounds.playCoinSound();
-                    onClose();
-                    setActiveScreen('ADD_CASH');
-                  }}
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-black text-[10px] px-2.5 py-1 rounded-full uppercase tracking-wider"
-                >
-                  ADD
-                </button>
+                {!currentUser.isRegistered ? (
+                  <button
+                    onClick={() => {
+                      sounds.playCoinSound();
+                      onClose();
+                      onOpenLogin();
+                    }}
+                    className="bg-amber-400 hover:bg-amber-300 text-stone-950 font-black text-[10px] px-2.5 py-1 rounded-full uppercase tracking-wider"
+                  >
+                    SIGN UP
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => {
+                      sounds.playCoinSound();
+                      onClose();
+                      setActiveScreen('ADD_CASH');
+                    }}
+                    className="bg-emerald-600 hover:bg-emerald-500 text-white font-black text-[10px] px-2.5 py-1 rounded-full uppercase tracking-wider"
+                  >
+                    ADD
+                  </button>
+                )}
               </div>
             </div>
           </div>
         </div>
+
+        {/* Guest ₹50 Sign Up Promo banner */}
+        {!currentUser.isRegistered && (
+          <div className="p-3 bg-gradient-to-r from-amber-500 to-yellow-500 text-stone-950 flex items-center justify-between border-b border-amber-600">
+            <div>
+              <p className="text-xs font-black uppercase">GET FREE ₹50 WELCOME BONUS</p>
+              <p className="text-[10px] font-semibold text-stone-900 leading-tight">Instant registration with WhatsApp/Mobile</p>
+            </div>
+            <button
+              onClick={() => {
+                sounds.playCoinSound();
+                onClose();
+                onOpenLogin();
+              }}
+              className="bg-stone-950 hover:bg-stone-900 text-amber-300 font-black text-xs px-3 py-1.5 rounded-full uppercase shadow-xs shrink-0"
+            >
+              SIGN UP
+            </button>
+          </div>
+        )}
 
         {/* Download & Install App Banner Card */}
         <div className="p-3 bg-gradient-to-r from-amber-500/20 via-yellow-500/10 to-transparent border-b border-amber-500/30 space-y-2">
@@ -573,16 +616,10 @@ export const DrawerMenu: React.FC<DrawerMenuProps> = ({
           {/* Section 6: Admin Portal (Protected by Supabase & Real Admin Authentication) */}
           <div className="py-2.5 px-4 bg-stone-950/40 border-t border-stone-800">
             <button
-              onClick={async () => {
+              onClick={() => {
                 sounds.playCoinSound();
-                const verified = await checkAdminPermissions();
-                if (verified) {
-                  onClose();
-                  onOpenAdmin();
-                } else {
-                  setAdminAuthError(null);
-                  setShowAdminLoginModal(true);
-                }
+                onClose();
+                onOpenAdmin();
               }}
               className="w-full bg-gradient-to-r from-amber-500/15 via-yellow-500/10 to-amber-500/5 hover:from-amber-500/25 hover:to-yellow-500/15 border border-amber-500/30 p-2.5 rounded-xl flex items-center justify-between text-left transition-all active:scale-[0.98] group"
             >

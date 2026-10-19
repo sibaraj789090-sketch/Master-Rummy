@@ -52,6 +52,9 @@ export interface UserProfile {
   is18PlusConfirmed?: boolean;
   isKycVerified: boolean;
   kycDetails?: KycDetails;
+  isRegistered?: boolean;
+  hasDeposited?: boolean;
+  totalDeposited?: number;
   isBanned: boolean;
   referralCode: string;
   referredBy?: string;

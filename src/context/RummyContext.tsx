@@ -111,51 +111,48 @@ const RummyContext = createContext<RummyContextType | null>(null);
 
 const STORAGE_KEY = 'master_rummy_v1_store';
 
-const DEFAULT_USER: UserProfile = {
-  id: '19098975',
-  username: 'player35150',
-  phone: '8438242692',
-  whatsappNumber: '8438242692',
-  isWhatsappVerified: true,
-  is18PlusConfirmed: true,
+export const createDefaultGuestUser = (): UserProfile => ({
+  id: `guest_${Date.now()}`,
+  username: 'Guest Player',
+  phone: '',
+  whatsappNumber: '',
+  isWhatsappVerified: false,
+  is18PlusConfirmed: false,
   email: '',
   telegram: '',
-  dob: '2001-05-14',
+  dob: '',
   gender: 'Male',
   avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80',
-  depositBalance: 1500.0,
-  withdrawalBalance: 3500.0,
-  bonusBalance: 500.0,
+  depositBalance: 0.0,
+  withdrawalBalance: 0.0,
+  bonusBalance: 50.0, // Default ₹50 for all users!
   practiceChips: 10000,
-  isKycVerified: true,
+  isKycVerified: false,
+  isRegistered: false,
+  hasDeposited: false,
+  totalDeposited: 0,
   kycDetails: {
-    is18PlusConfirmed: true,
-    overallStatus: 'VERIFIED',
+    is18PlusConfirmed: false,
+    overallStatus: 'UNVERIFIED',
     aadhaar: {
       type: 'AADHAAR',
-      documentNumber: '8492-3847-1920',
-      holderName: 'Player 35150',
-      dob: '2001-05-14',
-      status: 'VERIFIED',
-      submittedAt: '2026-10-10',
-      verifiedAt: '2026-10-10',
-      frontImage: 'https://images.unsplash.com/photo-1589829545856-d10d557cf95f?auto=format&fit=crop&w=600&q=80',
+      documentNumber: '',
+      holderName: '',
+      status: 'NOT_SUBMITTED',
     },
     pan: {
       type: 'PAN',
-      documentNumber: 'ABCDE1234F',
-      holderName: 'Player 35150',
-      dob: '2001-05-14',
-      status: 'VERIFIED',
-      submittedAt: '2026-10-10',
-      verifiedAt: '2026-10-10',
-      frontImage: 'https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?auto=format&fit=crop&w=600&q=80',
+      documentNumber: '',
+      holderName: '',
+      status: 'NOT_SUBMITTED',
     },
   },
   isBanned: false,
-  referralCode: 'MR35150',
-  createdAt: '2026-10-10',
-};
+  referralCode: 'MRGUEST',
+  createdAt: new Date().toISOString().split('T')[0],
+});
+
+const DEFAULT_USER: UserProfile = createDefaultGuestUser();
 
 const INITIAL_USERS: UserProfile[] = [
   DEFAULT_USER,
@@ -477,9 +474,20 @@ export const RummyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [currentUser, setCurrentUser] = useState<UserProfile>(() => {
     try {
       const saved = localStorage.getItem(`${STORAGE_KEY}_user`);
-      return saved ? JSON.parse(saved) : DEFAULT_USER;
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        // If it's the old hardcoded default demo account (player35150 or 19098975) or not registered, reset to fresh guest with ₹50
+        if (parsed.id === '19098975' || parsed.username === 'player35150') {
+          return createDefaultGuestUser();
+        }
+        if (parsed.bonusBalance === undefined || parsed.bonusBalance === null) {
+          parsed.bonusBalance = 50.0;
+        }
+        return parsed;
+      }
+      return createDefaultGuestUser();
     } catch {
-      return DEFAULT_USER;
+      return createDefaultGuestUser();
     }
   });
 
@@ -826,7 +834,8 @@ export const RummyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     const bonusAmount = Math.round((amount * bonusRate) / 100);
     const newDeposit = currentUser.depositBalance + amount;
-    const newBonus = currentUser.bonusBalance + bonusAmount;
+    const newBonus = (currentUser.bonusBalance || 0) + bonusAmount;
+    const newTotalDeposited = (currentUser.totalDeposited || 0) + amount;
 
     const newTxDeposit: Transaction = {
       id: `tx_${Date.now()}_dep`,
@@ -854,6 +863,8 @@ export const RummyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       ...prev,
       depositBalance: Number(newDeposit.toFixed(2)),
       bonusBalance: Number(newBonus.toFixed(2)),
+      hasDeposited: true,
+      totalDeposited: newTotalDeposited,
     }));
 
     setTransactions((prev) => [newTxDeposit, newTxBonus, ...prev]);
@@ -868,6 +879,15 @@ export const RummyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return {
         success: false,
         message: 'Strict 18+ KYC Required: You must complete and have your Aadhaar Card & PAN Card approved before requesting withdrawals.',
+      };
+    }
+
+    const minDepositRequired = 100;
+    const totalUserDeposits = currentUser.totalDeposited || 0;
+    if (!currentUser.hasDeposited || totalUserDeposits < minDepositRequired) {
+      return {
+        success: false,
+        message: `Minimum Deposit Required: To activate bank withdrawals, you must complete at least one minimum deposit of ₹${minDepositRequired}.`,
       };
     }
 
@@ -988,31 +1008,41 @@ export const RummyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return { success: true, message: `Successfully registered for ${t.title}!` };
   };
 
-  // Launch Game (100% Real Money Cash Only)
+  // Launch Game (Real Cash & Welcome Bonus Entry)
   const launchGame = (config: NonNullable<RummyContextType['activeGameConfig']>) => {
-    let totalCash = currentUser.depositBalance + currentUser.withdrawalBalance;
-    if (totalCash < config.entryFee) {
-      // Auto demo recharge so testing is seamless
-      const needed = config.entryFee + 1000;
-      currentUser.depositBalance += needed;
-      totalCash += needed;
+    const totalPlayableCash = currentUser.depositBalance + currentUser.withdrawalBalance + (currentUser.bonusBalance || 0);
+    if (totalPlayableCash < config.entryFee) {
+      return false;
     }
 
-    // Deduct real cash entry fee
+    // Deduct entry fee: priority bonus balance (enabling new users to play with their ₹50 welcome bonus!), then deposit, then withdrawal
     let remaining = config.entryFee;
+    let newBonus = currentUser.bonusBalance || 0;
     let newDeposit = currentUser.depositBalance;
     let newWithdrawal = currentUser.withdrawalBalance;
 
-    if (newDeposit >= remaining) {
-      newDeposit -= remaining;
+    if (newBonus >= remaining) {
+      newBonus -= remaining;
+      remaining = 0;
     } else {
-      remaining -= newDeposit;
-      newDeposit = 0;
-      newWithdrawal -= remaining;
+      remaining -= newBonus;
+      newBonus = 0;
+    }
+
+    if (remaining > 0) {
+      if (newDeposit >= remaining) {
+        newDeposit -= remaining;
+        remaining = 0;
+      } else {
+        remaining -= newDeposit;
+        newDeposit = 0;
+        newWithdrawal = Math.max(0, newWithdrawal - remaining);
+      }
     }
 
     setCurrentUser((prev) => ({
       ...prev,
+      bonusBalance: Number(newBonus.toFixed(2)),
       depositBalance: Number(newDeposit.toFixed(2)),
       withdrawalBalance: Number(newWithdrawal.toFixed(2)),
     }));

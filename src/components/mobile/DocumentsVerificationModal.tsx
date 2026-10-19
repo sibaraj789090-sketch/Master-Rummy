@@ -38,34 +38,31 @@ export const DocumentsVerificationModal: React.FC<DocumentsVerificationModalProp
   // Aadhaar states
   const existingAadhaar = currentUser.kycDetails?.aadhaar;
   const [aadhaarNumber, setAadhaarNumber] = useState(
-    existingAadhaar?.documentNumber || '8492 3847 1920'
+    existingAadhaar?.documentNumber || ''
   );
   const [aadhaarName, setAadhaarName] = useState(
-    existingAadhaar?.holderName || currentUser.username || 'Player 35150'
+    existingAadhaar?.holderName || (currentUser.username !== 'Guest Player' ? currentUser.username : '')
   );
   const [aadhaarFrontImg, setAadhaarFrontImg] = useState<string>(
-    existingAadhaar?.frontImage ||
-      'https://images.unsplash.com/photo-1589829545856-d10d557cf95f?auto=format&fit=crop&w=600&q=80'
+    existingAadhaar?.frontImage || ''
   );
   const [aadhaarBackImg, setAadhaarBackImg] = useState<string>(
-    existingAadhaar?.backImage ||
-      'https://images.unsplash.com/photo-1589829545856-d10d557cf95f?auto=format&fit=crop&w=600&q=80'
+    existingAadhaar?.backImage || ''
   );
 
   // PAN states
   const existingPan = currentUser.kycDetails?.pan;
   const [panNumber, setPanNumber] = useState(
-    existingPan?.documentNumber || 'ABCDE1234F'
+    existingPan?.documentNumber || ''
   );
   const [panName, setPanName] = useState(
-    existingPan?.holderName || currentUser.username || 'Player 35150'
+    existingPan?.holderName || (currentUser.username !== 'Guest Player' ? currentUser.username : '')
   );
   const [panDob, setPanDob] = useState(
-    existingPan?.dob || currentUser.dob || '2001-05-14'
+    existingPan?.dob || currentUser.dob || ''
   );
   const [panFrontImg, setPanFrontImg] = useState<string>(
-    existingPan?.frontImage ||
-      'https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?auto=format&fit=crop&w=600&q=80'
+    existingPan?.frontImage || ''
   );
 
   // 18+ declaration checkbox
@@ -211,15 +208,7 @@ export const DocumentsVerificationModal: React.FC<DocumentsVerificationModalProp
     }, 600);
   };
 
-  // Instant Instant AI OCR Approval demo
-  const handleInstantDemoApproval = (type: 'AADHAAR' | 'PAN' | 'ALL') => {
-    sounds.playCoinSound();
-    adminApproveKycDoc(currentUser.id, type);
-    setFeedback({
-      type: 'success',
-      message: `Verified instantly! ${type === 'ALL' ? 'Full KYC & 18+ Approved' : `${type} Approved`}.`,
-    });
-  };
+
 
   const aadhaarStatus = currentUser.kycDetails?.aadhaar?.status || (currentUser.isKycVerified ? 'VERIFIED' : 'PENDING');
   const panStatus = currentUser.kycDetails?.pan?.status || (currentUser.isKycVerified ? 'VERIFIED' : 'PENDING');
@@ -532,20 +521,8 @@ export const DocumentsVerificationModal: React.FC<DocumentsVerificationModalProp
                 </div>
 
                 {/* Sample Document quick load helper */}
-                <div className="mt-2 flex items-center justify-between">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      sounds.playCardClick();
-                      setAadhaarFrontImg('https://images.unsplash.com/photo-1589829545856-d10d557cf95f?auto=format&fit=crop&w=600&q=80');
-                      setAadhaarBackImg('https://images.unsplash.com/photo-1589829545856-d10d557cf95f?auto=format&fit=crop&w=600&q=80');
-                    }}
-                    className="text-[10px] text-red-600 font-bold hover:underline flex items-center gap-1"
-                  >
-                    <Sparkles className="w-3 h-3 text-amber-500" />
-                    <span>Insert Test Aadhaar Samples</span>
-                  </button>
-                  <span className="text-[9px] text-slate-400">Encrypted 256-bit</span>
+                <div className="mt-2 flex items-center justify-end">
+                  <span className="text-[9px] text-slate-400">UIDAI Government Verified · Encrypted 256-bit</span>
                 </div>
               </div>
 
@@ -578,16 +555,6 @@ export const DocumentsVerificationModal: React.FC<DocumentsVerificationModalProp
                     <span>SUBMIT AADHAAR FOR VERIFICATION</span>
                   </>
                 )}
-              </button>
-
-              {/* Demo Auto-Approval button for immediate testing */}
-              <button
-                type="button"
-                onClick={() => handleInstantDemoApproval('AADHAAR')}
-                className="w-full py-2 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 font-bold text-[11px] rounded-xl flex items-center justify-center gap-1.5 transition-colors"
-              >
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                <span>Instant Auto-Verify Aadhaar (Demo Mode)</span>
               </button>
             </form>
           </div>
@@ -716,20 +683,8 @@ export const DocumentsVerificationModal: React.FC<DocumentsVerificationModalProp
                   </label>
                 )}
 
-                {/* Sample Document quick load helper */}
-                <div className="mt-2 flex items-center justify-between">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      sounds.playCardClick();
-                      setPanFrontImg('https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?auto=format&fit=crop&w=600&q=80');
-                    }}
-                    className="text-[10px] text-red-600 font-bold hover:underline flex items-center gap-1"
-                  >
-                    <Sparkles className="w-3 h-3 text-amber-500" />
-                    <span>Insert Test PAN Sample</span>
-                  </button>
-                  <span className="text-[9px] text-slate-400">Income Tax Compliant</span>
+                <div className="mt-2 flex items-center justify-end">
+                  <span className="text-[9px] text-slate-400">Income Tax Department Compliant · Encrypted</span>
                 </div>
               </div>
 
@@ -762,16 +717,6 @@ export const DocumentsVerificationModal: React.FC<DocumentsVerificationModalProp
                     <span>SUBMIT PAN CARD FOR VERIFICATION</span>
                   </>
                 )}
-              </button>
-
-              {/* Demo Auto-Approval button for immediate testing */}
-              <button
-                type="button"
-                onClick={() => handleInstantDemoApproval('PAN')}
-                className="w-full py-2 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 font-bold text-[11px] rounded-xl flex items-center justify-center gap-1.5 transition-colors"
-              >
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                <span>Instant Auto-Verify PAN (Demo Mode)</span>
               </button>
             </form>
           </div>

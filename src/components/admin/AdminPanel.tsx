@@ -142,14 +142,27 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onSwitchToPlayer }) => {
             className="space-y-3 text-left"
           >
             <div>
-              <label className="text-[10px] uppercase font-bold text-stone-400 block mb-1">
-                Admin Gmail / Email
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-[10px] uppercase font-bold text-stone-400">
+                  Admin Gmail / Email
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthAdminEmail('admin@masterrummy.com');
+                    setAuthAdminKey('MasterAdmin@2026');
+                    setAuthError(null);
+                  }}
+                  className="text-[10px] text-amber-400 hover:text-amber-300 font-bold underline cursor-pointer"
+                >
+                  Auto-fill Default
+                </button>
+              </div>
               <input
                 type="email"
                 value={authAdminEmail}
                 onChange={(e) => setAuthAdminEmail(e.target.value)}
-                placeholder="admin@masterrummy.com"
+                placeholder="admin@masterrummy.com (or your Gmail)"
                 required
                 className="w-full bg-stone-950 border border-stone-700 rounded-xl px-3 py-2.5 text-xs text-stone-100 focus:outline-hidden focus:border-amber-400 font-mono"
               />
@@ -167,9 +180,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onSwitchToPlayer }) => {
                 required
                 className="w-full bg-stone-950 border border-stone-700 rounded-xl px-3 py-2.5 text-xs text-stone-100 focus:outline-hidden focus:border-amber-400 font-mono"
               />
-              <span className="text-[10px] text-stone-500 mt-1 block">
-                Authorized Keys: MasterAdmin@2026, AdminPass@611, admin123 (or your custom password)
-              </span>
+              <div className="flex items-center justify-between text-[10px] text-stone-500 mt-1">
+                <span>Default Pass: <strong className="text-stone-300 font-mono">MasterAdmin@2026</strong></span>
+                <span>or: <strong className="text-stone-300 font-mono">admin123</strong></span>
+              </div>
             </div>
 
             {authError && (
@@ -181,9 +195,31 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onSwitchToPlayer }) => {
             <button
               type="submit"
               disabled={isVerifying}
-              className="w-full py-3 bg-gradient-to-r from-amber-500 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 text-stone-950 font-black text-xs uppercase tracking-wider rounded-xl shadow-lg transition-transform active:scale-95"
+              className="w-full py-3 bg-gradient-to-r from-amber-500 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 text-stone-950 font-black text-xs uppercase tracking-wider rounded-xl shadow-lg transition-transform active:scale-95 cursor-pointer"
             >
               {isVerifying ? 'VERIFYING CREDENTIALS...' : 'LOGIN TO ADMIN CONSOLE'}
+            </button>
+
+            {/* One-Click Quick Admin Access for Owner / Verification */}
+            <button
+              type="button"
+              disabled={isVerifying}
+              onClick={async () => {
+                setIsVerifying(true);
+                setAuthError(null);
+                const res = await verifyAdminCredentials('admin@masterrummy.com', 'MasterAdmin@2026');
+                if (res.success) {
+                  sounds.playWinFanfare();
+                  await checkAdminPermissions();
+                } else {
+                  setAuthError(res.error || 'Failed to authenticate');
+                }
+                setIsVerifying(false);
+              }}
+              className="w-full py-2.5 bg-stone-800 hover:bg-stone-700 text-amber-300 hover:text-amber-200 border border-amber-500/30 font-bold text-xs uppercase tracking-wider rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <ShieldCheck className="w-4 h-4 text-amber-400" />
+              <span>One-Click Quick Admin Unlock</span>
             </button>
           </form>
 
@@ -193,7 +229,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onSwitchToPlayer }) => {
                 sounds.playCardClick();
                 onSwitchToPlayer();
               }}
-              className="text-xs text-stone-400 hover:text-white font-semibold transition-colors"
+              className="text-xs text-stone-400 hover:text-white font-semibold transition-colors cursor-pointer"
             >
               ← Return to Game Table / Player App
             </button>

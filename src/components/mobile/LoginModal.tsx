@@ -34,6 +34,8 @@ interface LoginModalProps {
   onOpenSupport: () => void;
   onOpenSupabaseSetup?: () => void;
   onOpenDocumentsVerification?: () => void;
+  onSuccess?: () => void;
+  initialMode?: 'LOGIN' | 'SIGNUP';
 }
 
 export const LoginModal: React.FC<LoginModalProps> = ({
@@ -42,14 +44,16 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   onOpenSupport,
   onOpenSupabaseSetup,
   onOpenDocumentsVerification,
+  onSuccess,
+  initialMode = 'SIGNUP',
 }) => {
   const { currentUser, updateCurrentUserProfile } = useRummy();
 
-  const [authMode, setAuthMode] = useState<'WHATSAPP' | 'TEST_ACCOUNTS' | 'EMAIL'>('WHATSAPP');
-  const [isSignUp, setIsSignUp] = useState(false);
+  const [authMode, setAuthMode] = useState<'WHATSAPP' | 'EMAIL'>('WHATSAPP');
+  const [isSignUp, setIsSignUp] = useState(() => !currentUser.isRegistered || initialMode === 'SIGNUP');
 
   // WhatsApp Auth States
-  const [whatsappNumber, setWhatsappNumber] = useState('8438242692');
+  const [whatsappNumber, setWhatsappNumber] = useState('');
   const [signupName, setSignupName] = useState('');
   const [whatsappStep, setWhatsappStep] = useState<'NUMBER' | 'OTP'>('NUMBER');
   const [whatsappOtp, setWhatsappOtp] = useState('');
@@ -150,21 +154,23 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         whatsappNumber: cleanNum,
         isWhatsappVerified: true,
         is18PlusConfirmed: true,
+        isRegistered: true,
         username: playerName,
-        // Give new signup bonus
-        ...(isSignUp ? { bonusBalance: (currentUser.bonusBalance || 0) + 50 } : {}),
+        // Guarantee ₹50 welcome bonus for new users
+        bonusBalance: currentUser.bonusBalance && currentUser.bonusBalance >= 50 ? currentUser.bonusBalance : 50,
       });
 
       sounds.playWinFanfare();
       setSuccessMessage(
         isSignUp
-          ? `🎉 Welcome to Master Rummy, ${playerName}! 18+ WhatsApp Verified!`
+          ? `🎉 Welcome to Master Rummy, ${playerName}! 18+ Verified & ₹50 Welcome Bonus Credited!`
           : `✅ Verified via WhatsApp OTP! Welcome back, ${playerName}!`
       );
 
       setTimeout(() => {
         onClose();
-      }, 1000);
+        if (onSuccess) onSuccess();
+      }, 900);
     }, 800);
   };
 
@@ -172,39 +178,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const handleAutoFillOtp = () => {
     sounds.playCardClick();
     setWhatsappOtp(simulatedGeneratedOtp);
-  };
-
-  // 3. Quick Test Account Handler (Instant 2-player verification)
-  const handleQuickLogin = async (accountNum: 1 | 2) => {
-    setIsSubmitting(true);
-    setErrorMessage(null);
-    setSuccessMessage(null);
-    sounds.playCoinSound();
-
-    try {
-      const res = await signInQuickTestUser(accountNum);
-      if (res.error) {
-        setErrorMessage(res.error);
-      } else if (res.user) {
-        updateCurrentUserProfile({
-          id: res.user.id,
-          username: res.user.username,
-          avatar: res.user.avatar,
-          practiceChips: res.user.practiceChips,
-          isKycVerified: true,
-          is18PlusConfirmed: true,
-        });
-        sounds.playWinFanfare();
-        setSuccessMessage(`Logged in as ${res.user.username}!`);
-        setTimeout(() => {
-          onClose();
-        }, 600);
-      }
-    } catch (err: any) {
-      setErrorMessage(err.message || 'Login failed');
-    } finally {
-      setIsSubmitting(false);
-    }
   };
 
   // 4. Email Auth Handler
@@ -240,11 +213,16 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             avatar: res.user.avatar,
             practiceChips: res.user.practiceChips,
             email: res.user.email,
+            isRegistered: true,
             is18PlusConfirmed: true,
+            bonusBalance: currentUser.bonusBalance && currentUser.bonusBalance >= 50 ? currentUser.bonusBalance : 50,
           });
           sounds.playWinFanfare();
-          setSuccessMessage('Account registered successfully! 18+ verified.');
-          setTimeout(() => onClose(), 600);
+          setSuccessMessage('Account registered successfully! ₹50 Welcome Bonus Credited.');
+          setTimeout(() => {
+            onClose();
+            if (onSuccess) onSuccess();
+          }, 800);
         }
       } else {
         const res = await signInWithEmail(email, password);
@@ -257,11 +235,16 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             avatar: res.user.avatar,
             practiceChips: res.user.practiceChips,
             email: res.user.email,
+            isRegistered: true,
             is18PlusConfirmed: true,
+            bonusBalance: currentUser.bonusBalance && currentUser.bonusBalance >= 50 ? currentUser.bonusBalance : 50,
           });
           sounds.playWinFanfare();
           setSuccessMessage(`Welcome back, ${res.user.username}!`);
-          setTimeout(() => onClose(), 600);
+          setTimeout(() => {
+            onClose();
+            if (onSuccess) onSuccess();
+          }, 800);
         }
       }
     } catch (err: any) {
@@ -277,17 +260,25 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     await signOutUser();
     updateCurrentUserProfile({
       id: `guest_${Date.now()}`,
-      username: 'Guest_Player',
+      username: 'Guest Player',
       email: '',
       phone: '',
       whatsappNumber: '',
       isWhatsappVerified: false,
+      isRegistered: false,
+      is18PlusConfirmed: false,
+      depositBalance: 0,
+      withdrawalBalance: 0,
+      bonusBalance: 50.0,
       practiceChips: 10000,
+      isKycVerified: false,
+      hasDeposited: false,
+      totalDeposited: 0,
     });
     setSuccessMessage('Logged out successfully');
   };
 
-  const isLoggedInUser = currentUser.username && currentUser.username !== 'Guest_Player';
+  const isLoggedInUser = Boolean(currentUser.isRegistered && currentUser.username !== 'Guest Player' && (currentUser.phone || currentUser.email));
 
   return (
     <div className="fixed inset-0 z-50 bg-[#420409] text-white flex flex-col justify-between p-4 select-none overflow-y-auto no-scrollbar">
@@ -503,36 +494,37 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               SIGN UP & LOGIN WITH WHATSAPP OTP
             </h2>
 
-            {/* Auth Mode Tabs */}
-            <div className="flex bg-black/40 border border-red-800/60 rounded-xl p-1 mt-3 mb-3 text-xs font-bold">
+            {/* ₹50 Welcome Bonus Promotional Banner */}
+            <div className="bg-gradient-to-r from-amber-500/20 via-yellow-400/30 to-amber-500/20 border border-amber-400/50 rounded-2xl p-2.5 my-2.5 flex items-center justify-between text-left">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-full bg-amber-400 text-stone-950 flex items-center justify-center font-black text-xs shadow-md shrink-0">
+                  ₹50
+                </div>
+                <div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-black text-amber-300">FREE ₹50 WELCOME BONUS</span>
+                    <span className="text-[9px] bg-red-600 text-white font-black px-1.5 py-0.2 rounded">100% REAL</span>
+                  </div>
+                  <p className="text-[10px] text-stone-300 leading-tight">Instant bonus credited to your wallet upon free registration!</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Auth Mode Tabs (WhatsApp Mobile OTP / Email Login) */}
+            <div className="flex bg-black/40 border border-red-800/60 rounded-xl p-1 mb-3 text-xs font-bold">
               <button
                 onClick={() => {
                   sounds.playCardClick();
                   setAuthMode('WHATSAPP');
                 }}
-                className={`flex-1 py-1.5 rounded-lg transition-all flex items-center justify-center gap-1 ${
+                className={`flex-1 py-1.5 rounded-lg transition-all flex items-center justify-center gap-1.5 ${
                   authMode === 'WHATSAPP'
                     ? 'bg-[#25D366] text-stone-950 font-black shadow-xs'
                     : 'text-stone-300 hover:text-white'
                 }`}
               >
                 <MessageSquare className="w-3.5 h-3.5" />
-                <span>WhatsApp OTP</span>
-              </button>
-
-              <button
-                onClick={() => {
-                  sounds.playCardClick();
-                  setAuthMode('TEST_ACCOUNTS');
-                }}
-                className={`flex-1 py-1.5 rounded-lg transition-all flex items-center justify-center gap-1 ${
-                  authMode === 'TEST_ACCOUNTS'
-                    ? 'bg-amber-500 text-stone-950 font-black shadow-xs'
-                    : 'text-stone-300 hover:text-white'
-                }`}
-              >
-                <Zap className="w-3.5 h-3.5" />
-                <span>Instant Test</span>
+                <span>WhatsApp / Mobile OTP</span>
               </button>
 
               <button
@@ -540,14 +532,14 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                   sounds.playCardClick();
                   setAuthMode('EMAIL');
                 }}
-                className={`flex-1 py-1.5 rounded-lg transition-all flex items-center justify-center gap-1 ${
+                className={`flex-1 py-1.5 rounded-lg transition-all flex items-center justify-center gap-1.5 ${
                   authMode === 'EMAIL'
                     ? 'bg-amber-500 text-stone-950 font-black shadow-xs'
                     : 'text-stone-300 hover:text-white'
                 }`}
               >
                 <Mail className="w-3.5 h-3.5" />
-                <span>Email Login</span>
+                <span>Email Sign In</span>
               </button>
             </div>
 
@@ -773,64 +765,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               </div>
             )}
 
-            {/* Mode 2: Quick Test Accounts */}
-            {authMode === 'TEST_ACCOUNTS' && (
-              <div className="bg-[#8b0f19] border border-red-700/60 rounded-3xl p-5 shadow-2xl text-left space-y-3">
-                <div className="flex items-center gap-1.5 text-amber-300">
-                  <Sparkles className="w-4 h-4" />
-                  <span className="text-xs font-black uppercase">Two-Player Instant Test Accounts</span>
-                </div>
-                <p className="text-[11px] text-stone-200 leading-snug">
-                  Use these 1-click accounts to test multiplayer matchmaking & game rooms between two devices or browser tabs:
-                </p>
 
-                {/* Account 1 */}
-                <button
-                  type="button"
-                  disabled={isSubmitting}
-                  onClick={() => handleQuickLogin(1)}
-                  className="w-full p-3 bg-stone-900/90 hover:bg-stone-800 border-2 border-emerald-500/70 rounded-2xl flex items-center justify-between text-left transition-all active:scale-95"
-                >
-                  <div className="flex items-center gap-2.5">
-                    <img
-                      src="https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&q=80"
-                      alt="Player Alpha"
-                      className="w-10 h-10 rounded-full border border-emerald-400 object-cover"
-                    />
-                    <div>
-                      <span className="text-xs font-black text-emerald-300 block">PLAYER 1 (ALPHA)</span>
-                      <span className="text-[10px] text-stone-300">Device 1 / Tab 1 · Host Room</span>
-                    </div>
-                  </div>
-                  <span className="text-[11px] font-black bg-emerald-600 text-white px-2.5 py-1 rounded-lg">
-                    LOG IN ›
-                  </span>
-                </button>
-
-                {/* Account 2 */}
-                <button
-                  type="button"
-                  disabled={isSubmitting}
-                  onClick={() => handleQuickLogin(2)}
-                  className="w-full p-3 bg-stone-900/90 hover:bg-stone-800 border-2 border-cyan-500/70 rounded-2xl flex items-center justify-between text-left transition-all active:scale-95"
-                >
-                  <div className="flex items-center gap-2.5">
-                    <img
-                      src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80"
-                      alt="Player Beta"
-                      className="w-10 h-10 rounded-full border border-cyan-400 object-cover"
-                    />
-                    <div>
-                      <span className="text-xs font-black text-cyan-300 block">PLAYER 2 (BETA)</span>
-                      <span className="text-[10px] text-stone-300">Device 2 / Tab 2 · Join Room</span>
-                    </div>
-                  </div>
-                  <span className="text-[11px] font-black bg-cyan-600 text-white px-2.5 py-1 rounded-lg">
-                    LOG IN ›
-                  </span>
-                </button>
-              </div>
-            )}
 
             {/* Mode 3: Supabase Email */}
             {authMode === 'EMAIL' && (

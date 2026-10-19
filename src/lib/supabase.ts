@@ -406,28 +406,32 @@ export const verifyAdminCredentials = async (
     (customKey && cleanKey === customKey) ||
     (envKey && cleanKey === envKey);
 
+  // If the user provided a valid admin master key, authorize and auto-register this email
+  if (isValidAdminKey) {
+    if (typeof window !== 'undefined') {
+      const finalEmail = cleanEmail || 'admin@masterrummy.com';
+      sessionStorage.setItem('master_rummy_admin_verified', 'true');
+      sessionStorage.setItem('master_rummy_admin_email', finalEmail);
+      localStorage.setItem('master_rummy_admin_verified', 'true');
+      localStorage.setItem('master_rummy_admin_email', finalEmail);
+      if (cleanEmail) {
+        localStorage.setItem('master_rummy_admin_custom_email', cleanEmail);
+      }
+    }
+    return { success: true };
+  }
+
   if (!isAuthorizedEmail) {
     return {
       success: false,
-      error: 'Access denied: This email is not authorized for Admin Panel access.',
+      error: 'Invalid credentials. Use an authorized Admin email & password, or click Quick Admin Access.',
     };
   }
 
-  if (!isValidAdminKey) {
-    return {
-      success: false,
-      error: 'Invalid Admin Security Key or credentials.',
-    };
-  }
-
-  if (typeof window !== 'undefined') {
-    sessionStorage.setItem('master_rummy_admin_verified', 'true');
-    sessionStorage.setItem('master_rummy_admin_email', cleanEmail);
-    localStorage.setItem('master_rummy_admin_verified', 'true');
-    localStorage.setItem('master_rummy_admin_email', cleanEmail);
-  }
-
-  return { success: true };
+  return {
+    success: false,
+    error: 'Invalid Admin Security Key or password.',
+  };
 };
 
 export const setCustomAdminCredentials = (email: string, passwordOrKey: string) => {

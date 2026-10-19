@@ -23,14 +23,25 @@ import { sounds } from './utils/sound';
 
 const isCurrentPathAdmin = (): boolean => {
   if (typeof window === 'undefined') return false;
-  const path = window.location.pathname.toLowerCase();
-  return path === '/admin' || path.startsWith('/admin/');
+  const path = window.location.pathname.toLowerCase().replace(/\/+$/, '');
+  const hash = window.location.hash.toLowerCase().replace(/\/+$/, '');
+  const search = window.location.search.toLowerCase();
+  return (
+    path === '/admin' ||
+    path.startsWith('/admin/') ||
+    hash === '#/admin' ||
+    hash === '#admin' ||
+    hash.startsWith('#/admin/') ||
+    search.includes('admin=true') ||
+    search.includes('page=admin') ||
+    search.includes('view=admin')
+  );
 };
 
 const MainApp: React.FC = () => {
   const { activeScreen, setActiveScreen, activeGameConfig } = useRummy();
 
-  // Root view: 'PLAYER' or 'ADMIN' based on /admin URL path
+  // Root view: 'PLAYER' or 'ADMIN' based on /admin URL path or hash
   const [viewMode, setViewMode] = useState<'PLAYER' | 'ADMIN'>(() => {
     return isCurrentPathAdmin() ? 'ADMIN' : 'PLAYER';
   });
@@ -65,19 +76,31 @@ const MainApp: React.FC = () => {
     };
 
     window.addEventListener('popstate', handleLocationChange);
-    return () => window.removeEventListener('popstate', handleLocationChange);
+    window.addEventListener('hashchange', handleLocationChange);
+    return () => {
+      window.removeEventListener('popstate', handleLocationChange);
+      window.removeEventListener('hashchange', handleLocationChange);
+    };
   }, []);
 
   const handleSwitchToPlayer = () => {
     if (typeof window !== 'undefined' && isCurrentPathAdmin()) {
-      window.history.pushState(null, '', '/');
+      try {
+        window.history.pushState(null, '', '/');
+      } catch {
+        window.location.hash = '';
+      }
     }
     setViewMode('PLAYER');
   };
 
   const handleSwitchToAdmin = () => {
     if (typeof window !== 'undefined' && !isCurrentPathAdmin()) {
-      window.history.pushState(null, '', '/admin');
+      try {
+        window.history.pushState(null, '', '/admin');
+      } catch {
+        window.location.hash = '/admin';
+      }
     }
     setViewMode('ADMIN');
     setIsLoadingScreen(false);
@@ -103,6 +126,7 @@ const MainApp: React.FC = () => {
           onOpenNotifications={() => setIsNotificationsOpen(true)}
           onOpenInstall={() => setIsInstallOpen(true)}
           onOpenSupabaseSetup={() => setIsSupabaseSetupOpen(true)}
+          onOpenLogin={() => setIsLoginOpen(true)}
         />
 
         {/* Active Screen Content */}
@@ -115,6 +139,7 @@ const MainApp: React.FC = () => {
                 setActiveScreen('TOURNAMENTS');
               }}
               onOpenInstall={() => setIsInstallOpen(true)}
+              onOpenLogin={() => setIsLoginOpen(true)}
             />
           )}
 
@@ -159,6 +184,7 @@ const MainApp: React.FC = () => {
           }}
           onOpenSupport={() => setIsSupportOpen(true)}
           onOpenDocumentsVerification={() => setIsDocumentsVerificationOpen(true)}
+          onOpenAddCash={() => setIsAddCashOpen(true)}
         />
 
         <MyWalletModal

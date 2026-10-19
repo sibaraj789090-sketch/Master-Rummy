@@ -11,6 +11,7 @@ interface TopHeaderProps {
   onOpenNotifications: () => void;
   onOpenInstall?: () => void;
   onOpenSupabaseSetup?: () => void;
+  onOpenLogin?: () => void;
 }
 
 export const TopHeader: React.FC<TopHeaderProps> = ({
@@ -18,11 +19,18 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
   onOpenNotifications,
   onOpenInstall,
   onOpenSupabaseSetup,
+  onOpenLogin,
 }) => {
   const { currentUser, setActiveScreen, notificationBadgeCount, unreadBroadcast, dismissBroadcast, adminSettings } = useRummy();
   const { isInstallable, isInstalled, install } = usePWAInstall();
   const [showBalanceDropdown, setShowBalanceDropdown] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
+
+  const totalPlayableCash = (
+    currentUser.depositBalance +
+    currentUser.withdrawalBalance +
+    (currentUser.bonusBalance || 0)
+  ).toFixed(2);
 
   return (
     <div className="relative z-30">
@@ -51,7 +59,11 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
         <div
           onClick={() => {
             sounds.playCardClick();
-            onOpenProfile();
+            if (!currentUser.isRegistered && onOpenLogin) {
+              onOpenLogin();
+            } else {
+              onOpenProfile();
+            }
           }}
           className="flex items-center gap-2 cursor-pointer active:scale-95 transition-transform"
         >
@@ -74,15 +86,21 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
 
           <div className="flex flex-col">
             <div className="flex items-center gap-1">
-              <span className="text-xs font-bold tracking-tight text-white/95 truncate max-w-[75px]">
-                {currentUser.username}
+              <span className="text-xs font-bold tracking-tight text-white/95 truncate max-w-[85px]">
+                {!currentUser.isRegistered ? 'Guest User' : currentUser.username}
               </span>
               <span className="bg-red-700 text-white font-black text-[8px] px-1 py-0.2 rounded shrink-0">
                 18+
               </span>
             </div>
             <div className="flex items-center gap-1 text-[9px] text-amber-300 font-medium">
-              <span>{currentUser.isKycVerified ? 'KYC Verified' : 'Online'}</span>
+              {!currentUser.isRegistered ? (
+                <span className="text-amber-400 font-extrabold flex items-center gap-0.5">
+                  ₹50 Bonus Ready
+                </span>
+              ) : (
+                <span>{currentUser.isKycVerified ? 'KYC Verified' : 'Online'}</span>
+              )}
             </div>
           </div>
         </div>
@@ -100,7 +118,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
               ₹
             </span>
             <span className="tabular-nums font-black text-amber-200">
-              {(currentUser.depositBalance + currentUser.withdrawalBalance).toFixed(2)}
+              {totalPlayableCash}
             </span>
             <ChevronDown className={`w-3 h-3 text-amber-400 transition-transform ${showBalanceDropdown ? 'rotate-180' : ''}`} />
           </button>
@@ -121,15 +139,13 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                   <span>Winnings (Withdrawable):</span>
                   <span className="font-bold text-emerald-400 font-mono">₹{currentUser.withdrawalBalance.toFixed(2)}</span>
                 </div>
-                {currentUser.bonusBalance > 0 && (
-                  <div className="flex justify-between text-stone-300">
-                    <span>Bonus Cash:</span>
-                    <span className="font-bold text-amber-300 font-mono">₹{currentUser.bonusBalance.toFixed(2)}</span>
-                  </div>
-                )}
+                <div className="flex justify-between text-stone-300">
+                  <span>Bonus Cash (Welcome):</span>
+                  <span className="font-bold text-amber-300 font-mono">₹{(currentUser.bonusBalance || 0).toFixed(2)}</span>
+                </div>
                 <div className="flex justify-between font-extrabold text-amber-300 pt-1.5 border-t border-stone-800">
                   <span>Total Real Balance:</span>
-                  <span className="font-mono">₹{(currentUser.depositBalance + currentUser.withdrawalBalance).toFixed(2)}</span>
+                  <span className="font-mono">₹{totalPlayableCash}</span>
                 </div>
               </div>
               <div className="flex gap-2 pt-1">

@@ -33,16 +33,19 @@ interface LobbyViewProps {
   onOpenAddCash: () => void;
   onOpenTournaments: () => void;
   onOpenInstall?: () => void;
+  onOpenLogin?: () => void;
 }
 
 export const LobbyView: React.FC<LobbyViewProps> = ({
   onOpenAddCash,
   onOpenTournaments,
   onOpenInstall,
+  onOpenLogin,
 }) => {
   const { launchGame, currentUser, adminSettings, setMultiplayerState } = useRummy();
   const { isInstallable, isInstalled, install } = usePWAInstall();
   const [isDownloadingApk, setIsDownloadingApk] = useState(false);
+  const [showSignupPrompt, setShowSignupPrompt] = useState(false);
 
   // Matchmaking & Room Code states
   const [isMatchmakingOpen, setIsMatchmakingOpen] = useState(false);
@@ -116,15 +119,18 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
 
   const handlePlayNow = async () => {
     triggerFullscreenRotate();
+
+    // User requirement: Must sign up before playing!
+    if (!currentUser.isRegistered) {
+      sounds.playCardClick();
+      setShowSignupPrompt(true);
+      return;
+    }
+
     if (category === 'TOURNAMENTS') {
       onOpenTournaments();
       return;
     }
-
-    sounds.playCoinSound();
-    setIsMatchmakingOpen(true);
-    setMatchingStatus('Connecting to Realtime matchmaking...');
-    setCountdown(null);
 
     const entryFee =
       variant === 'Points'
@@ -132,6 +138,22 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
         : variant === 'Pool'
         ? currentPoolEntry
         : currentDealEntry;
+
+    const totalPlayableCash =
+      currentUser.depositBalance +
+      currentUser.withdrawalBalance +
+      (currentUser.bonusBalance || 0);
+
+    if (totalPlayableCash < entryFee) {
+      sounds.playCardClick();
+      onOpenAddCash();
+      return;
+    }
+
+    sounds.playCoinSound();
+    setIsMatchmakingOpen(true);
+    setMatchingStatus('Connecting to Realtime matchmaking...');
+    setCountdown(null);
 
     const gameTypeDetail = variant === 'Points' ? pointsType : variant === 'Pool' ? poolType : dealsCount;
 
@@ -194,6 +216,13 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
 
   const handleJoinCodeSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!currentUser.isRegistered) {
+      sounds.playCardClick();
+      setShowSignupPrompt(true);
+      return;
+    }
+
     const clean = codeInputValue.trim();
     if (!clean || clean.length < 5) {
       setCodeError('Please enter a valid room code');
@@ -232,6 +261,37 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
 
   return (
     <div className="flex-1 overflow-y-auto no-scrollbar pb-6 bg-[#f8fafc] text-slate-800 flex flex-col relative select-none">
+      {/* 0. Guest ₹50 Welcome Bonus Banner */}
+      {!currentUser.isRegistered && (
+        <div className="bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 text-stone-950 p-2.5 px-3 flex items-center justify-between shadow-md border-b border-amber-600/30">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-full bg-stone-950 text-amber-300 flex items-center justify-center font-black text-xs shrink-0 shadow-xs border border-amber-300">
+              ₹50
+            </div>
+            <div>
+              <div className="flex items-center gap-1.5">
+                <span className="font-black text-xs uppercase tracking-tight text-stone-950">
+                  FREE ₹50 WELCOME BONUS FOR NEW PLAYERS
+                </span>
+                <span className="bg-red-700 text-white font-black text-[9px] px-1 py-0.2 rounded">18+</span>
+              </div>
+              <p className="text-[11px] font-bold text-stone-900 leading-tight">
+                All new users get ₹50 free! Sign up now to start playing cash rummy.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => {
+              sounds.playCoinSound();
+              if (onOpenLogin) onOpenLogin();
+            }}
+            className="bg-stone-950 hover:bg-stone-900 text-amber-300 font-black text-xs px-3 py-1.5 rounded-full uppercase tracking-wider shadow-sm shrink-0 active:scale-95 transition-transform"
+          >
+            CLAIM ₹50
+          </button>
+        </div>
+      )}
+
       {/* 1. Dynamic Promotional Hero Banner (From Screenshots 1, 6, 7) */}
       <div className="relative overflow-hidden bg-gradient-to-r from-[#7f0b15] via-[#a31522] to-[#60050e] text-white p-3 shadow-inner">
         <div className="flex items-center justify-between gap-2">
@@ -925,6 +985,69 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
             >
               {giftClaimed ? 'CLAIMED! +₹50' : 'CLAIM FREE REWARD'}
             </button>
+          </div>
+        </div>
+      )}
+      {/* Signup Required to Play Modal (User requirement: Must signup to start playing & gets ₹50 bonus) */}
+      {showSignupPrompt && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs select-none">
+          <div className="bg-gradient-to-b from-[#6b0b14] to-[#380408] border border-amber-400/50 rounded-3xl p-5 max-w-sm w-full text-white text-center shadow-2xl relative space-y-4">
+            <button
+              onClick={() => setShowSignupPrompt(false)}
+              className="absolute top-3 right-3 p-1 rounded-full bg-black/40 hover:bg-black/60 text-white/80"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <div className="w-16 h-16 rounded-full bg-gradient-to-br from-amber-400 to-yellow-600 text-stone-950 flex items-center justify-center mx-auto shadow-lg font-black text-2xl border-2 border-amber-200">
+              ₹50
+            </div>
+
+            <div>
+              <div className="flex items-center justify-center gap-1.5 mb-1">
+                <span className="bg-red-700 text-white font-black text-[9px] px-1.5 py-0.2 rounded">18+ ONLY</span>
+                <span className="text-xs font-black uppercase text-amber-300 tracking-wider">Free Welcome Bonus</span>
+              </div>
+              <h3 className="text-xl font-black text-white">Sign Up to Start Playing!</h3>
+              <p className="text-xs text-stone-200 mt-1 leading-snug">
+                You must create an account with your mobile number to enter games. Your <strong className="text-amber-300 font-bold">₹50 Real Cash Welcome Bonus</strong> is ready to use!
+              </p>
+            </div>
+
+            <div className="bg-black/40 rounded-2xl p-3 border border-amber-500/20 text-xs text-left space-y-2">
+              <div className="flex items-center gap-2 text-stone-300">
+                <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>Default ₹50 Bonus Credited Instantly</span>
+              </div>
+              <div className="flex items-center gap-2 text-stone-300">
+                <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>Fast 10-Second WhatsApp / Mobile Verification</span>
+              </div>
+              <div className="flex items-center gap-2 text-stone-300">
+                <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>100% Real Money Tables & Instant Payouts</span>
+              </div>
+            </div>
+
+            <div className="space-y-2 pt-1">
+              <button
+                onClick={() => {
+                  sounds.playCoinSound();
+                  setShowSignupPrompt(false);
+                  if (onOpenLogin) onOpenLogin();
+                }}
+                className="w-full py-3 bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 hover:from-amber-300 hover:to-yellow-300 text-stone-950 font-black text-xs uppercase tracking-wider rounded-xl shadow-lg active:scale-95 transition-transform flex items-center justify-center gap-2"
+              >
+                <Sparkles className="w-4 h-4 text-stone-950" />
+                <span>SIGN UP NOW & CLAIM ₹50</span>
+              </button>
+              <button
+                onClick={() => setShowSignupPrompt(false)}
+                className="w-full py-2 bg-transparent hover:bg-white/10 text-stone-300 text-xs font-bold rounded-xl transition-colors"
+              >
+                Continue Browsing
+              </button>
+            </div>
           </div>
         </div>
       )}
