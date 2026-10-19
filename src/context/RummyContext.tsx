@@ -17,7 +17,13 @@ import {
 import { DEFAULT_BOT_SETTINGS, DEFAULT_BOT_STATS } from '../utils/botEngine';
 import { sounds } from '../utils/sound';
 import { triggerWinConfetti } from '../utils/confetti';
-import { getSavedAuthUser, checkIsUserAdmin } from '../lib/supabase';
+import {
+  supabase,
+  getSavedAuthUser,
+  checkIsUserAdmin,
+  getActiveSupabaseUser,
+  SupabaseAuthUser,
+} from '../lib/supabase';
 
 interface RummyContextType {
   currentUser: UserProfile;
@@ -761,20 +767,117 @@ export const RummyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return admin;
   };
 
-  // Restore saved auth user on initial launch and check admin role
-  useEffect(() => {
-    const saved = getSavedAuthUser();
-    if (saved) {
-      setCurrentUser((prev) => ({
-        ...prev,
-        id: saved.id,
-        username: saved.username,
-        avatar: saved.avatar,
-        practiceChips: saved.practiceChips || prev.practiceChips,
-        email: saved.email || prev.email,
-      }));
+  // Helper to connect authenticated user from Mobile OTP or Google Sign-In
+  const applyAuthenticatedUser = (authUser: SupabaseAuthUser) => {
+    setCurrentUser((prev) => {
+      // Find matching user in existing database / allUsers to prevent duplicate accounts
+      const existing = allUsers.find(
+        (u) =>
+          u.id === authUser.id ||
+          (authUser.phone && u.phone && u.phone === authUser.phone) ||
+          (authUser.email && u.email && u.email.toLowerCase() === authUser.email.toLowerCase())
+      );
+
+      const targetId = existing ? existing.id : authUser.id;
+      const targetPhone = authUser.phone || existing?.phone || prev.phone;
+      const targetEmail = authUser.email || existing?.email || prev.email;
+      const targetUsername = authUser.username || existing?.username || prev.username;
+      const targetAvatar = authUser.avatar || existing?.avatar || prev.avatar;
+
+      // Welcome bonus guarantee: ₹50 for fresh registration
+      const bonusBalance =
+        existing && existing.bonusBalance !== undefined
+          ? existing.bonusBalance
+          : Math.max(prev.bonusBalance || 0, 50.0);
+
+      const updatedUser: UserProfile = {
+        ...(existing || prev),
+        id: targetId,
+        username: targetUsername,
+        phone: targetPhone,
+        whatsappNumber: targetPhone,
+        isWhatsappVerified: Boolean(targetPhone),
+        email: targetEmail,
+        avatar: targetAvatar,
+        practiceChips: authUser.practiceChips || existing?.practiceChips || prev.practiceChips || 10000,
+        bonusBalance,
+        depositBalance: existing?.depositBalance ?? prev.depositBalance ?? 0,
+        withdrawalBalance: existing?.withdrawalBalance ?? prev.withdrawalBalance ?? 0,
+        hasDeposited: existing?.hasDeposited ?? prev.hasDeposited ?? false,
+        totalDeposited: existing?.totalDeposited ?? prev.totalDeposited ?? 0,
+        isRegistered: true,
+        is18PlusConfirmed: true,
+        isKycVerified: existing?.isKycVerified ?? prev.isKycVerified ?? false,
+      };
+
+      setAllUsers((users) => {
+        const index = users.findIndex(
+          (u) =>
+            u.id === targetId ||
+            (targetPhone && u.phone === targetPhone) ||
+            (targetEmail && u.email && u.email.toLowerCase() === targetEmail.toLowerCase())
+        );
+        if (index >= 0) {
+          const cloned = [...users];
+          cloned[index] = updatedUser;
+          return cloned;
+        }
+        return [...users, updatedUser];
+      });
+
+      return updatedUser;
+    });
+
+    checkIsUserAdmin(authUser).then((admin) => setIsAdmin(admin));
+
+    // Clean OAuth hash/token params from URL if returned from Google OAuth redirect
+    if (typeof window !== 'undefined' && (window.location.hash.includes('access_token=') || window.location.search.includes('code='))) {
+      try {
+        window.history.replaceState(null, document.title, window.location.pathname);
+      } catch {}
     }
-    checkIsUserAdmin(saved).then((admin) => setIsAdmin(admin));
+  };
+
+  // Restore saved auth user on initial launch and listen to Supabase Auth state (Google OAuth & Mobile OTP)
+  useEffect(() => {
+    // 1. Check active session or saved auth user
+    getActiveSupabaseUser().then((user) => {
+      if (user) {
+        applyAuthenticatedUser(user);
+      }
+    });
+
+    // 2. Real-time auth listener for Google OAuth callback & OTP logins
+    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (session?.user && (event === 'SIGNED_IN' || event === 'USER_UPDATED' || event === 'INITIAL_SESSION')) {
+        const supaUser = session.user;
+        const phone = supaUser.phone ? supaUser.phone.replace(/^\+91/, '').replace(/\D/g, '') : undefined;
+        const email = supaUser.email;
+        const isGoogle = supaUser.app_metadata?.provider === 'google' || supaUser.user_metadata?.iss?.includes('google');
+
+        const authUser: SupabaseAuthUser = {
+          id: supaUser.id,
+          email,
+          phone,
+          username:
+            supaUser.user_metadata?.full_name ||
+            supaUser.user_metadata?.name ||
+            (email ? email.split('@')[0] : `Player_${supaUser.id.slice(-4)}`),
+          avatar:
+            supaUser.user_metadata?.avatar_url ||
+            supaUser.user_metadata?.picture ||
+            'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&q=80',
+          practiceChips: 10000,
+          authProvider: isGoogle ? 'GOOGLE' : phone ? 'PHONE_OTP' : undefined,
+        };
+
+        applyAuthenticatedUser(authUser);
+      }
+    });
+
+    return () => {
+      authListener?.subscription?.unsubscribe();
+    };
   }, []);
 
   const setMultiplayerState = (

@@ -242,25 +242,7 @@ export const MyWalletModal: React.FC<MyWalletModalProps> = ({
               )}
             </div>
 
-            {/* WhatsApp Number */}
-            <div className="p-3 flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <span className="w-4 h-4 rounded-full bg-[#25D366] text-white flex items-center justify-center font-bold text-[8px]">
-                  WA
-                </span>
-                <div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-slate-600 font-medium">WhatsApp Number</span>
-                    <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-1.5 py-0.2 rounded">
-                      OTP Verified
-                    </span>
-                  </div>
-                  <p className="font-bold text-slate-900 mt-0.5">
-                    +91 {currentUser.whatsappNumber || currentUser.phone}
-                  </p>
-                </div>
-              </div>
-            </div>
+
 
             {/* Mobile Number */}
             <div className="p-3 flex items-center justify-between">

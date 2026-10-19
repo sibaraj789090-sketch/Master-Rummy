@@ -130,11 +130,15 @@ export const DrawerMenu: React.FC<DrawerMenuProps> = ({
                   </span>
                 ) : (
                   <>
-                    {currentUser.whatsappNumber && (
+                    {currentUser.phone ? (
                       <span className="text-[10px] text-emerald-400 font-bold flex items-center gap-0.5">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> WhatsApp
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> Mobile OTP
                       </span>
-                    )}
+                    ) : currentUser.email ? (
+                      <span className="text-[10px] text-blue-400 font-bold flex items-center gap-0.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-blue-400" /> Google
+                      </span>
+                    ) : null}
                     <span className="text-[10px] text-stone-300">
                       {currentUser.isKycVerified ? 'KYC Verified' : 'KYC Pending'}
                     </span>
@@ -183,7 +187,7 @@ export const DrawerMenu: React.FC<DrawerMenuProps> = ({
           <div className="p-3 bg-gradient-to-r from-amber-500 to-yellow-500 text-stone-950 flex items-center justify-between border-b border-amber-600">
             <div>
               <p className="text-xs font-black uppercase">GET FREE ₹50 WELCOME BONUS</p>
-              <p className="text-[10px] font-semibold text-stone-900 leading-tight">Instant registration with WhatsApp/Mobile</p>
+              <p className="text-[10px] font-semibold text-stone-900 leading-tight">Instant registration with Mobile OTP or Google</p>
             </div>
             <button
               onClick={() => {

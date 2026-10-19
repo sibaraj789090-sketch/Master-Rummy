@@ -343,7 +343,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onSwitchToPlayer }) => {
     (u) =>
       u.username.toLowerCase().includes(userSearch.toLowerCase()) ||
       u.phone.includes(userSearch) ||
-      (u.whatsappNumber && u.whatsappNumber.includes(userSearch)) ||
+      (u.email && u.email.toLowerCase().includes(userSearch.toLowerCase())) ||
       u.id.includes(userSearch)
   );
 
@@ -359,7 +359,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onSwitchToPlayer }) => {
     const matchesSearch =
       u.username.toLowerCase().includes(kycSearch.toLowerCase()) ||
       u.phone.includes(kycSearch) ||
-      (u.whatsappNumber && u.whatsappNumber.includes(kycSearch)) ||
+      (u.email && u.email.toLowerCase().includes(kycSearch.toLowerCase())) ||
       (u.kycDetails?.aadhaar?.documentNumber && u.kycDetails.aadhaar.documentNumber.includes(kycSearch)) ||
       (u.kycDetails?.pan?.documentNumber && u.kycDetails.pan.documentNumber.toUpperCase().includes(kycSearch.toUpperCase()));
 
@@ -1449,7 +1449,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onSwitchToPlayer }) => {
                               </span>
                             </div>
                             <p className="text-[11px] text-stone-400">
-                              Phone: {u.phone} · WhatsApp: {u.whatsappNumber || u.phone} · ID: {u.id}
+                              Phone: {u.phone || 'N/A'} · Email: {u.email || 'N/A'} · ID: {u.id}
                             </p>
                           </div>
                         </div>
@@ -1720,7 +1720,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onSwitchToPlayer }) => {
                 type="text"
                 value={userSearch}
                 onChange={(e) => setUserSearch(e.target.value)}
-                placeholder="Search players by username, phone number, WhatsApp, or ID..."
+                placeholder="Search players by username, phone number, email, or ID..."
                 className="w-full bg-stone-900 border border-stone-800 rounded-xl pl-9 pr-3 py-2 text-xs text-stone-100 placeholder-stone-500"
               />
             </div>
@@ -1753,7 +1753,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onSwitchToPlayer }) => {
                             <div>
                               <span className="font-extrabold text-white block">{u.username}</span>
                               <span className="text-[10px] text-stone-500 font-mono">
-                                Phone: {u.phone || 'N/A'} · WhatsApp: {u.whatsappNumber || 'N/A'}
+                                Phone: {u.phone || 'N/A'} · Email: {u.email || 'N/A'}
                               </span>
                             </div>
                           </div>

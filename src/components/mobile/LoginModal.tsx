@@ -5,25 +5,22 @@ import {
   CheckCircle2,
   Headphones,
   X,
-  Mail,
-  Lock,
+  Phone,
   User,
-  Zap,
   LogOut,
-  Sparkles,
   AlertCircle,
   Database,
-  MessageSquare,
   ArrowRight,
   RefreshCw,
   FileText,
-  Check,
+  ExternalLink,
+  Sparkles,
 } from 'lucide-react';
 import { sounds } from '../../utils/sound';
 import {
-  signInWithEmail,
-  signUpWithEmail,
-  signInQuickTestUser,
+  sendMobileOtp,
+  verifyMobileOtp,
+  signInWithGoogle,
   signOutUser,
   getSupabaseConfig,
 } from '../../lib/supabase';
@@ -49,59 +46,57 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 }) => {
   const { currentUser, updateCurrentUserProfile } = useRummy();
 
-  const [authMode, setAuthMode] = useState<'WHATSAPP' | 'EMAIL'>('WHATSAPP');
+  // Active auth tab: 'MOBILE_OTP' | 'GOOGLE'
+  const [authTab, setAuthTab] = useState<'MOBILE_OTP' | 'GOOGLE'>('MOBILE_OTP');
   const [isSignUp, setIsSignUp] = useState(() => !currentUser.isRegistered || initialMode === 'SIGNUP');
 
-  // WhatsApp Auth States
-  const [whatsappNumber, setWhatsappNumber] = useState('');
+  // Mobile OTP States
+  const [mobileNumber, setMobileNumber] = useState('');
   const [signupName, setSignupName] = useState('');
-  const [whatsappStep, setWhatsappStep] = useState<'NUMBER' | 'OTP'>('NUMBER');
-  const [whatsappOtp, setWhatsappOtp] = useState('');
-  const [simulatedGeneratedOtp, setSimulatedGeneratedOtp] = useState('482910');
-  const [showIncomingMessagePopup, setShowIncomingMessagePopup] = useState(false);
-  const [resendTimer, setResendTimer] = useState(30);
+  const [mobileStep, setMobileStep] = useState<'NUMBER' | 'OTP'>('NUMBER');
+  const [mobileOtp, setMobileOtp] = useState('');
+  const [resendTimer, setResendTimer] = useState(60);
 
-  // 18+ Checkbox State
+  // 18+ Mandatory Declaration Checkbox
   const [is18PlusAgreed, setIs18PlusAgreed] = useState(true);
 
-  // Email form states
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [username, setUsername] = useState('');
-
+  // Status & loading states
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isGoogleSubmitting, setIsGoogleSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [showConfigHelp, setShowConfigHelp] = useState(false);
 
   const config = getSupabaseConfig();
 
   // Resend OTP countdown timer
   useEffect(() => {
     let timer: any;
-    if (whatsappStep === 'OTP' && resendTimer > 0) {
+    if (mobileStep === 'OTP' && resendTimer > 0) {
       timer = setInterval(() => {
         setResendTimer((prev) => prev - 1);
       }, 1000);
     }
     return () => clearInterval(timer);
-  }, [whatsappStep, resendTimer]);
+  }, [mobileStep, resendTimer]);
 
   if (!isOpen) return null;
 
-  // 1. WhatsApp OTP Request
-  const handleSendWhatsappOtp = (e: React.FormEvent) => {
+  // 1. Send Real SMS OTP to Mobile Number
+  const handleSendMobileOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
     setSuccessMessage(null);
+    setShowConfigHelp(false);
 
-    const cleanNum = whatsappNumber.replace(/\D/g, '');
-    if (cleanNum.length < 10) {
-      setErrorMessage('Please enter a valid 10-digit WhatsApp number');
+    const cleanNum = mobileNumber.replace(/\D/g, '');
+    if (cleanNum.length !== 10) {
+      setErrorMessage('Please enter a valid 10-digit Indian mobile number (e.g., 9876543210)');
       return;
     }
 
     if (isSignUp && !signupName.trim()) {
-      setErrorMessage('Please enter your full player name for registration');
+      setErrorMessage('Please enter your player name for account registration');
       return;
     }
 
@@ -113,43 +108,81 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     sounds.playCardClick();
     setIsSubmitting(true);
 
-    // Generate random 6-digit OTP code
-    const generated = Math.floor(100000 + Math.random() * 900000).toString();
-    setSimulatedGeneratedOtp(generated);
+    const res = await sendMobileOtp(cleanNum);
+    setIsSubmitting(false);
 
-    setTimeout(() => {
-      setIsSubmitting(false);
-      setWhatsappStep('OTP');
-      setResendTimer(30);
-      setShowIncomingMessagePopup(true);
+    if (!res.success) {
+      setErrorMessage(res.error || 'Failed to dispatch SMS OTP.');
+      if (
+        !config.isConfigured ||
+        res.error?.toLowerCase().includes('provider') ||
+        res.error?.toLowerCase().includes('configuration')
+      ) {
+        setShowConfigHelp(true);
+      }
+    } else {
       sounds.playCoinSound();
-    }, 700);
+      setMobileStep('OTP');
+      setResendTimer(60);
+      setSuccessMessage(res.message || `SMS OTP dispatched to +91 ${cleanNum}.`);
+    }
   };
 
-  // 2. WhatsApp OTP Submit & Verification
-  const handleVerifyWhatsappOtp = (e: React.FormEvent) => {
+  // 2. Resend SMS OTP
+  const handleResendOtp = async () => {
+    if (resendTimer > 0) return;
+    setErrorMessage(null);
+    setSuccessMessage(null);
+    sounds.playCardClick();
+    setIsSubmitting(true);
+
+    const cleanNum = mobileNumber.replace(/\D/g, '');
+    const res = await sendMobileOtp(cleanNum);
+    setIsSubmitting(false);
+
+    if (!res.success) {
+      setErrorMessage(res.error || 'Failed to resend SMS OTP.');
+      if (!config.isConfigured || res.error?.toLowerCase().includes('provider')) {
+        setShowConfigHelp(true);
+      }
+    } else {
+      sounds.playCoinSound();
+      setResendTimer(60);
+      setSuccessMessage(`New SMS OTP dispatched to +91 ${cleanNum}.`);
+    }
+  };
+
+  // 3. Verify Real SMS OTP
+  const handleVerifyMobileOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
+    setSuccessMessage(null);
 
-    if (whatsappOtp.length < 6) {
-      setErrorMessage('Please enter the complete 6-digit WhatsApp OTP');
-      return;
-    }
-
-    if (whatsappOtp !== simulatedGeneratedOtp && whatsappOtp !== '123456' && whatsappOtp !== '482910') {
-      setErrorMessage(`Invalid OTP. Please enter the OTP sent to WhatsApp: ${simulatedGeneratedOtp}`);
+    const cleanOtp = mobileOtp.trim();
+    if (cleanOtp.length < 6) {
+      setErrorMessage('Please enter the complete 6-digit OTP code received on your phone.');
       return;
     }
 
     sounds.playCoinSound();
     setIsSubmitting(true);
 
-    setTimeout(() => {
-      setIsSubmitting(false);
-      const cleanNum = whatsappNumber.replace(/\D/g, '');
-      const playerName = isSignUp && signupName.trim() ? signupName.trim() : `Player_${cleanNum.slice(-4)}`;
+    const cleanNum = mobileNumber.replace(/\D/g, '');
+    const res = await verifyMobileOtp(cleanNum, cleanOtp, signupName);
+    setIsSubmitting(false);
 
+    if (res.error) {
+      setErrorMessage(res.error);
+      if (!config.isConfigured) {
+        setShowConfigHelp(true);
+      }
+      return;
+    }
+
+    if (res.user) {
+      const playerName = res.user.username;
       updateCurrentUserProfile({
+        id: res.user.id,
         phone: cleanNum,
         whatsappNumber: cleanNum,
         isWhatsappVerified: true,
@@ -164,93 +197,40 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       setSuccessMessage(
         isSignUp
           ? `🎉 Welcome to Master Rummy, ${playerName}! 18+ Verified & ₹50 Welcome Bonus Credited!`
-          : `✅ Verified via WhatsApp OTP! Welcome back, ${playerName}!`
+          : `✅ Verified via Mobile OTP! Welcome back, ${playerName}!`
       );
 
       setTimeout(() => {
         onClose();
         if (onSuccess) onSuccess();
       }, 900);
-    }, 800);
+    }
   };
 
-  // Auto-fill WhatsApp OTP
-  const handleAutoFillOtp = () => {
-    sounds.playCardClick();
-    setWhatsappOtp(simulatedGeneratedOtp);
-  };
-
-  // 4. Email Auth Handler
-  const handleEmailAuth = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!email || !password) {
-      setErrorMessage('Please enter email and password');
-      return;
-    }
-    if (password.length < 6) {
-      setErrorMessage('Password must be at least 6 characters');
-      return;
-    }
-    if (!is18PlusAgreed) {
-      setErrorMessage('You must confirm you are 18+ years of age');
-      return;
-    }
-
-    setIsSubmitting(true);
+  // 4. Continue with Google Login
+  const handleGoogleSignIn = async () => {
     setErrorMessage(null);
     setSuccessMessage(null);
-    sounds.playCardClick();
+    setShowConfigHelp(false);
 
-    try {
-      if (isSignUp) {
-        const res = await signUpWithEmail(email, password, username);
-        if (res.error) {
-          setErrorMessage(res.error);
-        } else if (res.user) {
-          updateCurrentUserProfile({
-            id: res.user.id,
-            username: res.user.username,
-            avatar: res.user.avatar,
-            practiceChips: res.user.practiceChips,
-            email: res.user.email,
-            isRegistered: true,
-            is18PlusConfirmed: true,
-            bonusBalance: currentUser.bonusBalance && currentUser.bonusBalance >= 50 ? currentUser.bonusBalance : 50,
-          });
-          sounds.playWinFanfare();
-          setSuccessMessage('Account registered successfully! ₹50 Welcome Bonus Credited.');
-          setTimeout(() => {
-            onClose();
-            if (onSuccess) onSuccess();
-          }, 800);
-        }
-      } else {
-        const res = await signInWithEmail(email, password);
-        if (res.error) {
-          setErrorMessage(res.error);
-        } else if (res.user) {
-          updateCurrentUserProfile({
-            id: res.user.id,
-            username: res.user.username,
-            avatar: res.user.avatar,
-            practiceChips: res.user.practiceChips,
-            email: res.user.email,
-            isRegistered: true,
-            is18PlusConfirmed: true,
-            bonusBalance: currentUser.bonusBalance && currentUser.bonusBalance >= 50 ? currentUser.bonusBalance : 50,
-          });
-          sounds.playWinFanfare();
-          setSuccessMessage(`Welcome back, ${res.user.username}!`);
-          setTimeout(() => {
-            onClose();
-            if (onSuccess) onSuccess();
-          }, 800);
-        }
+    if (!is18PlusAgreed) {
+      setErrorMessage('Strictly 18+ Only! You must confirm you are 18 years or older.');
+      return;
+    }
+
+    sounds.playCardClick();
+    setIsGoogleSubmitting(true);
+
+    const res = await signInWithGoogle();
+    setIsGoogleSubmitting(false);
+
+    if (res.error) {
+      setErrorMessage(res.error);
+      if (!config.isConfigured || res.error.toLowerCase().includes('provider')) {
+        setShowConfigHelp(true);
       }
-    } catch (err: any) {
-      setErrorMessage(err.message || 'Authentication error');
-    } finally {
-      setIsSubmitting(false);
+    } else {
+      setSuccessMessage('Redirecting to Google Sign-In...');
     }
   };
 
@@ -278,62 +258,15 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     setSuccessMessage('Logged out successfully');
   };
 
-  const isLoggedInUser = Boolean(currentUser.isRegistered && currentUser.username !== 'Guest Player' && (currentUser.phone || currentUser.email));
+  const isLoggedInUser = Boolean(
+    currentUser.isRegistered &&
+    currentUser.username !== 'Guest Player' &&
+    (currentUser.phone || currentUser.email)
+  );
 
   return (
     <div className="fixed inset-0 z-50 bg-[#420409] text-white flex flex-col justify-between p-4 select-none overflow-y-auto no-scrollbar">
-      {/* Simulated WhatsApp In-App Push Notification banner */}
-      {showIncomingMessagePopup && (
-        <div className="fixed top-3 left-4 right-4 z-50 max-w-sm mx-auto bg-[#1f2c34] text-white rounded-2xl p-3 shadow-2xl border border-emerald-500/60 animate-bounce">
-          <div className="flex items-start justify-between">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-full bg-[#25D366] text-white flex items-center justify-center font-bold">
-                <MessageSquare className="w-4 h-4 fill-white" />
-              </div>
-              <div>
-                <div className="flex items-center gap-1.5">
-                  <span className="font-extrabold text-xs text-white">WhatsApp</span>
-                  <span className="text-[10px] bg-emerald-950 text-emerald-400 px-1.5 py-0.2 rounded-full font-bold">
-                    Official Verified
-                  </span>
-                </div>
-                <span className="text-[11px] font-bold text-emerald-300">Master Rummy Security</span>
-              </div>
-            </div>
-            <button
-              onClick={() => setShowIncomingMessagePopup(false)}
-              className="p-1 rounded-full text-stone-400 hover:text-white"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          </div>
-
-          <div className="mt-2 bg-stone-900/90 rounded-xl p-2.5 border border-stone-700/60 text-left">
-            <p className="text-xs text-stone-200">
-              Your 6-digit WhatsApp verification OTP is:{' '}
-              <strong className="text-emerald-400 font-mono text-base tracking-widest">
-                {simulatedGeneratedOtp}
-              </strong>
-            </p>
-            <p className="text-[10px] text-stone-400 mt-1">
-              Valid for 5 minutes. Do not share with anyone.
-            </p>
-            <button
-              type="button"
-              onClick={() => {
-                handleAutoFillOtp();
-                setShowIncomingMessagePopup(false);
-              }}
-              className="mt-2 w-full py-1.5 bg-[#25D366] hover:bg-emerald-500 text-stone-950 font-black text-xs rounded-lg uppercase tracking-wider flex items-center justify-center gap-1"
-            >
-              <Check className="w-3.5 h-3.5" />
-              <span>Tap to Auto-fill OTP</span>
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Top Bar with Brand, 18+ Badge & Support */}
+      {/* Top Bar with Brand, 18+ Badge & Close/Support */}
       <div className="flex items-center justify-between pt-2">
         <div className="flex items-center gap-2">
           <div className="flex gap-0.5">
@@ -361,6 +294,19 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
+          {onOpenSupabaseSetup && (
+            <button
+              onClick={() => {
+                sounds.playCardClick();
+                onOpenSupabaseSetup();
+              }}
+              title="Authentication Provider Settings"
+              className="p-1 rounded-full bg-black/30 hover:bg-black/50 text-emerald-400"
+            >
+              <Database className="w-4 h-4" />
+            </button>
+          )}
+
           <button
             onClick={() => {
               sounds.playCardClick();
@@ -405,21 +351,23 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 </div>
                 <h3 className="text-lg font-black text-white truncate">{currentUser.username}</h3>
                 <p className="text-xs text-stone-300 truncate">
-                  {currentUser.whatsappNumber ? `WhatsApp: +91 ${currentUser.whatsappNumber}` : currentUser.phone || currentUser.email}
+                  {currentUser.phone ? `Mobile: +91 ${currentUser.phone}` : currentUser.email}
                 </p>
               </div>
             </div>
 
-            {/* WhatsApp & KYC Status Row */}
+            {/* Mobile & KYC Status Row */}
             <div className="grid grid-cols-2 gap-2 text-xs">
-              <div className="p-2 rounded-xl bg-black/40 border border-emerald-500/30 flex items-center gap-2">
-                <div className="w-6 h-6 rounded-full bg-[#25D366] text-white flex items-center justify-center shrink-0">
-                  <MessageSquare className="w-3.5 h-3.5 fill-white" />
+              <div className="p-2.5 rounded-xl bg-black/40 border border-emerald-500/30 flex items-center gap-2">
+                <div className="w-7 h-7 rounded-full bg-emerald-500 text-stone-950 flex items-center justify-center shrink-0">
+                  <Phone className="w-3.5 h-3.5" />
                 </div>
-                <div>
-                  <span className="text-[10px] text-stone-400 block font-bold">WhatsApp Login</span>
-                  <span className="font-extrabold text-emerald-400 text-[11px]">
-                    {currentUser.whatsappNumber ? 'Verified ✅' : 'Connected'}
+                <div className="min-w-0">
+                  <span className="text-[10px] text-stone-400 block font-bold">
+                    {currentUser.email && !currentUser.phone ? 'Google Login' : 'Mobile OTP'}
+                  </span>
+                  <span className="font-extrabold text-emerald-400 text-[11px] truncate block">
+                    Verified ✅
                   </span>
                 </div>
               </div>
@@ -431,9 +379,9 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     onOpenDocumentsVerification();
                   }
                 }}
-                className="p-2 rounded-xl bg-black/40 border border-amber-500/30 flex items-center gap-2 cursor-pointer hover:bg-black/60 transition-colors"
+                className="p-2.5 rounded-xl bg-black/40 border border-amber-500/30 flex items-center gap-2 cursor-pointer hover:bg-black/60 transition-colors"
               >
-                <div className="w-6 h-6 rounded-full bg-amber-500 text-stone-950 flex items-center justify-center shrink-0">
+                <div className="w-7 h-7 rounded-full bg-amber-500 text-stone-950 flex items-center justify-center shrink-0">
                   <FileText className="w-3.5 h-3.5" />
                 </div>
                 <div className="min-w-0">
@@ -459,8 +407,12 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 ₹{(currentUser.depositBalance + currentUser.withdrawalBalance).toFixed(2)}
               </p>
               <div className="flex justify-between items-center text-[10px] text-stone-300 mt-1.5 pt-1.5 border-t border-stone-800">
-                <span>Deposit: <strong className="text-white font-mono">₹{currentUser.depositBalance.toFixed(2)}</strong></span>
-                <span>Winnings: <strong className="text-emerald-400 font-mono">₹{currentUser.withdrawalBalance.toFixed(2)}</strong></span>
+                <span>
+                  Deposit: <strong className="text-white font-mono">₹{currentUser.depositBalance.toFixed(2)}</strong>
+                </span>
+                <span>
+                  Winnings: <strong className="text-emerald-400 font-mono">₹{currentUser.withdrawalBalance.toFixed(2)}</strong>
+                </span>
               </div>
             </div>
 
@@ -490,8 +442,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 18+ ONLY
               </span>
             </div>
-            <h2 className="text-sm font-black text-amber-400 tracking-tight mt-0.5">
-              SIGN UP & LOGIN WITH WHATSAPP OTP
+            <h2 className="text-xs font-black text-amber-300 tracking-tight mt-0.5">
+              SECURE LOGIN & SIGNUP
             </h2>
 
             {/* ₹50 Welcome Bonus Promotional Banner */}
@@ -503,77 +455,116 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 <div>
                   <div className="flex items-center gap-1.5">
                     <span className="text-xs font-black text-amber-300">FREE ₹50 WELCOME BONUS</span>
-                    <span className="text-[9px] bg-red-600 text-white font-black px-1.5 py-0.2 rounded">100% REAL</span>
+                    <span className="text-[9px] bg-red-600 text-white font-black px-1.5 py-0.2 rounded">
+                      100% REAL
+                    </span>
                   </div>
-                  <p className="text-[10px] text-stone-300 leading-tight">Instant bonus credited to your wallet upon free registration!</p>
+                  <p className="text-[10px] text-stone-300 leading-tight">
+                    Instant ₹50 bonus added to your wallet upon free registration!
+                  </p>
                 </div>
               </div>
             </div>
 
-            {/* Auth Mode Tabs (WhatsApp Mobile OTP / Email Login) */}
+            {/* Two Exclusive Methods Tab: 1. Mobile Number OTP  2. Gmail / Google */}
             <div className="flex bg-black/40 border border-red-800/60 rounded-xl p-1 mb-3 text-xs font-bold">
               <button
                 onClick={() => {
                   sounds.playCardClick();
-                  setAuthMode('WHATSAPP');
+                  setAuthTab('MOBILE_OTP');
+                  setErrorMessage(null);
                 }}
-                className={`flex-1 py-1.5 rounded-lg transition-all flex items-center justify-center gap-1.5 ${
-                  authMode === 'WHATSAPP'
-                    ? 'bg-[#25D366] text-stone-950 font-black shadow-xs'
+                className={`flex-1 py-2 rounded-lg transition-all flex items-center justify-center gap-1.5 ${
+                  authTab === 'MOBILE_OTP'
+                    ? 'bg-gradient-to-r from-amber-500 to-yellow-500 text-stone-950 font-black shadow-md'
                     : 'text-stone-300 hover:text-white'
                 }`}
               >
-                <MessageSquare className="w-3.5 h-3.5" />
-                <span>WhatsApp / Mobile OTP</span>
+                <Phone className="w-3.5 h-3.5" />
+                <span>Mobile Number OTP</span>
               </button>
 
               <button
                 onClick={() => {
                   sounds.playCardClick();
-                  setAuthMode('EMAIL');
+                  setAuthTab('GOOGLE');
+                  setErrorMessage(null);
                 }}
-                className={`flex-1 py-1.5 rounded-lg transition-all flex items-center justify-center gap-1.5 ${
-                  authMode === 'EMAIL'
-                    ? 'bg-amber-500 text-stone-950 font-black shadow-xs'
+                className={`flex-1 py-2 rounded-lg transition-all flex items-center justify-center gap-1.5 ${
+                  authTab === 'GOOGLE'
+                    ? 'bg-white text-stone-950 font-black shadow-md'
                     : 'text-stone-300 hover:text-white'
                 }`}
               >
-                <Mail className="w-3.5 h-3.5" />
-                <span>Email Sign In</span>
+                {/* Official Google 'G' icon */}
+                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24">
+                  <path
+                    fill="#4285F4"
+                    d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                  />
+                  <path
+                    fill="#34A853"
+                    d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                  />
+                  <path
+                    fill="#FBBC05"
+                    d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+                  />
+                  <path
+                    fill="#EA4335"
+                    d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+                  />
+                </svg>
+                <span>Google Login</span>
               </button>
             </div>
 
             {/* Notification alert */}
             {errorMessage && (
-              <div className="mb-3 p-2.5 rounded-xl bg-rose-950/90 border border-rose-500 text-rose-200 text-xs flex items-center gap-2 text-left shadow-lg">
-                <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
-                <span className="leading-tight">{errorMessage}</span>
-              </div>
-            )}
-            {successMessage && (
-              <div className="mb-3 p-2.5 rounded-xl bg-emerald-950/90 border border-emerald-500 text-emerald-200 text-xs flex items-center gap-2 text-left shadow-lg">
-                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
-                <span className="leading-tight">{successMessage}</span>
+              <div className="mb-3 p-2.5 rounded-xl bg-rose-950/90 border border-rose-500 text-rose-200 text-xs flex items-start gap-2 text-left shadow-lg">
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-400 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <p className="leading-tight font-semibold">{errorMessage}</p>
+                  {showConfigHelp && onOpenSupabaseSetup && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        sounds.playCardClick();
+                        onOpenSupabaseSetup();
+                      }}
+                      className="mt-1.5 text-[11px] bg-rose-900 hover:bg-rose-800 text-white font-bold px-2 py-0.5 rounded-md inline-flex items-center gap-1 border border-rose-400/40"
+                    >
+                      <Database className="w-3 h-3" />
+                      <span>Configure Supabase Credentials ›</span>
+                    </button>
+                  )}
+                </div>
               </div>
             )}
 
-            {/* PRIMARY MODE: WHATSAPP SIGNUP / LOGIN (User's main request!) */}
-            {authMode === 'WHATSAPP' && (
-              <div className="bg-[#1f2c34] border border-emerald-500/40 rounded-3xl p-5 shadow-2xl text-left space-y-3.5 relative overflow-hidden">
-                {/* Subtle WhatsApp top accent bar */}
-                <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-[#25D366] via-emerald-400 to-[#128C7E]" />
+            {successMessage && (
+              <div className="mb-3 p-2.5 rounded-xl bg-emerald-950/90 border border-emerald-500 text-emerald-200 text-xs flex items-center gap-2 text-left shadow-lg">
+                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+                <span className="leading-tight font-semibold">{successMessage}</span>
+              </div>
+            )}
+
+            {/* METHOD 1: MOBILE NUMBER OTP LOGIN & SIGNUP */}
+            {authTab === 'MOBILE_OTP' && (
+              <div className="bg-[#1f2429] border border-amber-500/40 rounded-3xl p-5 shadow-2xl text-left space-y-3.5 relative overflow-hidden">
+                <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-amber-400 via-yellow-300 to-amber-500" />
 
                 {/* Toggle Login vs Sign Up */}
                 <div className="flex items-center justify-between border-b border-stone-700/60 pb-2.5">
                   <div className="flex items-center gap-2">
-                    <div className="w-7 h-7 rounded-full bg-[#25D366] text-stone-950 flex items-center justify-center font-black">
-                      <MessageSquare className="w-4 h-4 fill-stone-950" />
+                    <div className="w-7 h-7 rounded-full bg-amber-400 text-stone-950 flex items-center justify-center font-black">
+                      <Phone className="w-4 h-4" />
                     </div>
                     <div>
                       <h3 className="text-sm font-black text-white">
-                        {isSignUp ? 'WhatsApp Sign Up' : 'WhatsApp Login'}
+                        {isSignUp ? 'Mobile Sign Up' : 'Mobile Login'}
                       </h3>
-                      <span className="text-[10px] text-emerald-400 font-medium">Instant OTP Verification</span>
+                      <span className="text-[10px] text-amber-300 font-medium">Real SMS OTP Verification</span>
                     </div>
                   </div>
 
@@ -582,7 +573,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     onClick={() => {
                       sounds.playCardClick();
                       setIsSignUp(!isSignUp);
-                      setWhatsappStep('NUMBER');
+                      setMobileStep('NUMBER');
                       setErrorMessage(null);
                     }}
                     className="text-xs font-bold text-amber-300 hover:text-amber-200 underline"
@@ -591,16 +582,16 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                   </button>
                 </div>
 
-                {whatsappStep === 'NUMBER' ? (
-                  <form onSubmit={handleSendWhatsappOtp} className="space-y-3">
+                {mobileStep === 'NUMBER' ? (
+                  <form onSubmit={handleSendMobileOtp} className="space-y-3">
                     {/* Full Name for Sign Up */}
                     {isSignUp && (
                       <div>
                         <label className="text-[11px] font-bold text-stone-300 block mb-1">
                           Full Player Name *
                         </label>
-                        <div className="bg-stone-900 border border-stone-700 rounded-xl p-2.5 flex items-center gap-2 focus-within:border-emerald-500">
-                          <User className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <div className="bg-stone-900 border border-stone-700 rounded-xl p-2.5 flex items-center gap-2 focus-within:border-amber-400">
+                          <User className="w-4 h-4 text-amber-400 shrink-0" />
                           <input
                             type="text"
                             value={signupName}
@@ -612,27 +603,28 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                       </div>
                     )}
 
-                    {/* WhatsApp Mobile Number */}
+                    {/* Mobile Number with Country Code +91 */}
                     <div>
                       <label className="text-[11px] font-bold text-stone-300 block mb-1">
-                        WhatsApp Mobile Number *
+                        Mobile Number (India) *
                       </label>
-                      <div className="bg-stone-900 border border-stone-700 rounded-xl p-2.5 flex items-center gap-2 focus-within:border-emerald-500">
-                        <span className="text-[#25D366] font-bold text-xs bg-emerald-950/60 px-1.5 py-0.5 rounded">
-                          🇮🇳 +91
+                      <div className="bg-stone-900 border border-stone-700 rounded-xl p-2.5 flex items-center gap-2 focus-within:border-amber-400">
+                        <span className="text-amber-300 font-bold text-xs bg-black/60 px-2 py-0.5 rounded flex items-center gap-1 border border-amber-400/30">
+                          <span>🇮🇳</span>
+                          <span>+91</span>
                         </span>
                         <input
                           type="tel"
                           maxLength={10}
-                          value={whatsappNumber}
-                          onChange={(e) => setWhatsappNumber(e.target.value.replace(/\D/g, ''))}
+                          value={mobileNumber}
+                          onChange={(e) => setMobileNumber(e.target.value.replace(/\D/g, ''))}
                           placeholder="98765 43210"
                           className="w-full bg-transparent text-white font-bold text-sm tracking-wider focus:outline-hidden"
                         />
-                        <MessageSquare className="w-4 h-4 text-[#25D366] shrink-0" />
+                        <Phone className="w-4 h-4 text-stone-400 shrink-0" />
                       </div>
                       <span className="text-[10px] text-stone-400 mt-1 block">
-                        We will send a 6-digit OTP to this WhatsApp number.
+                        A real SMS OTP will be sent to verify this mobile number.
                       </span>
                     </div>
 
@@ -643,7 +635,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                           type="checkbox"
                           checked={is18PlusAgreed}
                           onChange={(e) => setIs18PlusAgreed(e.target.checked)}
-                          className="mt-0.5 rounded text-emerald-500 focus:ring-emerald-400 w-4 h-4 shrink-0"
+                          className="mt-0.5 rounded text-amber-500 focus:ring-amber-400 w-4 h-4 shrink-0"
                         />
                         <span className="text-[11px] text-stone-200 font-semibold leading-tight">
                           <span className="bg-red-700 text-white font-black text-[9px] px-1 py-0.2 rounded mr-1">
@@ -658,31 +650,31 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     <button
                       type="submit"
                       disabled={isSubmitting}
-                      className="w-full py-3 bg-gradient-to-r from-[#25D366] to-[#128C7E] hover:from-emerald-400 hover:to-teal-600 text-stone-950 font-black text-xs uppercase tracking-wider rounded-xl shadow-lg active:scale-95 transition-all text-center flex items-center justify-center gap-2"
+                      className="w-full py-3 bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 hover:from-amber-400 hover:to-yellow-300 text-stone-950 font-black text-xs uppercase tracking-wider rounded-xl shadow-lg active:scale-95 transition-all text-center flex items-center justify-center gap-2"
                     >
                       {isSubmitting ? (
-                        <span>SENDING WHATSAPP OTP...</span>
+                        <span>SENDING SMS OTP...</span>
                       ) : (
                         <>
-                          <MessageSquare className="w-4 h-4 fill-stone-950" />
-                          <span>GET OTP ON WHATSAPP</span>
+                          <Phone className="w-4 h-4" />
+                          <span>SEND SMS OTP</span>
                           <ArrowRight className="w-3.5 h-3.5" />
                         </>
                       )}
                     </button>
                   </form>
                 ) : (
-                  /* STEP 2: ENTER WHATSAPP OTP */
-                  <form onSubmit={handleVerifyWhatsappOtp} className="space-y-3">
-                    <div className="bg-stone-900/80 p-3 rounded-xl border border-stone-700">
+                  /* STEP 2: ENTER MOBILE SMS OTP */
+                  <form onSubmit={handleVerifyMobileOtp} className="space-y-3">
+                    <div className="bg-stone-900/90 p-3 rounded-xl border border-stone-700">
                       <div className="flex justify-between items-center mb-1">
-                        <span className="text-xs text-stone-300">OTP sent via WhatsApp to:</span>
-                        <span className="font-mono font-bold text-emerald-400 text-xs">
-                          +91 {whatsappNumber}
+                        <span className="text-xs text-stone-300">OTP sent via SMS to:</span>
+                        <span className="font-mono font-bold text-amber-400 text-xs">
+                          +91 {mobileNumber}
                         </span>
                       </div>
                       <p className="text-[10px] text-stone-400">
-                        Check your WhatsApp chats for Master Rummy Verification Code.
+                        Please check your phone text messages for the Master Rummy verification code.
                       </p>
                     </div>
 
@@ -690,36 +682,34 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     <div>
                       <div className="flex justify-between items-center mb-1">
                         <label className="text-[11px] font-bold text-stone-300">
-                          Enter 6-Digit OTP *
+                          Enter 6-Digit SMS OTP *
                         </label>
-                        <button
-                          type="button"
-                          onClick={handleAutoFillOtp}
-                          className="text-[10px] text-amber-300 hover:underline font-bold flex items-center gap-1"
-                        >
-                          <Sparkles className="w-3 h-3" /> Auto-fill ({simulatedGeneratedOtp})
-                        </button>
+                        <span className="text-[10px] text-stone-400">
+                          {resendTimer > 0 ? `Expires in ${resendTimer}s` : 'Code expired? Resend below'}
+                        </span>
                       </div>
 
-                      <div className="bg-stone-900 border border-stone-700 rounded-xl p-2.5 focus-within:border-emerald-500">
+                      <div className="bg-stone-900 border border-stone-700 rounded-xl p-2.5 focus-within:border-amber-400">
                         <input
                           type="text"
                           maxLength={6}
-                          value={whatsappOtp}
-                          onChange={(e) => setWhatsappOtp(e.target.value.replace(/\D/g, ''))}
+                          autoFocus
+                          value={mobileOtp}
+                          onChange={(e) => setMobileOtp(e.target.value.replace(/\D/g, ''))}
                           placeholder="••••••"
                           className="w-full text-center tracking-[0.5em] text-white font-mono font-black text-xl focus:outline-hidden"
                         />
                       </div>
                     </div>
 
-                    {/* Resend OTP button & timer */}
+                    {/* Resend OTP button & Change Number */}
                     <div className="flex justify-between items-center text-xs">
                       <button
                         type="button"
                         onClick={() => {
                           sounds.playCardClick();
-                          setWhatsappStep('NUMBER');
+                          setMobileStep('NUMBER');
+                          setErrorMessage(null);
                         }}
                         className="text-stone-400 hover:text-white underline text-[11px]"
                       >
@@ -728,20 +718,16 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
                       <button
                         type="button"
-                        disabled={resendTimer > 0}
-                        onClick={() => {
-                          sounds.playCardClick();
-                          const newOtp = Math.floor(100000 + Math.random() * 900000).toString();
-                          setSimulatedGeneratedOtp(newOtp);
-                          setResendTimer(30);
-                          setShowIncomingMessagePopup(true);
-                        }}
+                        disabled={resendTimer > 0 || isSubmitting}
+                        onClick={handleResendOtp}
                         className={`text-[11px] font-bold flex items-center gap-1 ${
-                          resendTimer > 0 ? 'text-stone-500 cursor-not-allowed' : 'text-emerald-400 hover:underline'
+                          resendTimer > 0
+                            ? 'text-stone-500 cursor-not-allowed'
+                            : 'text-amber-400 hover:underline'
                         }`}
                       >
                         <RefreshCw className="w-3 h-3" />
-                        <span>{resendTimer > 0 ? `Resend in ${resendTimer}s` : 'Resend OTP via WhatsApp'}</span>
+                        <span>{resendTimer > 0 ? `Resend in ${resendTimer}s` : 'Resend SMS OTP'}</span>
                       </button>
                     </div>
 
@@ -749,14 +735,14 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     <button
                       type="submit"
                       disabled={isSubmitting}
-                      className="w-full py-3 bg-gradient-to-r from-[#25D366] to-[#128C7E] hover:from-emerald-400 hover:to-teal-600 text-stone-950 font-black text-xs uppercase tracking-wider rounded-xl shadow-lg active:scale-95 transition-all text-center flex items-center justify-center gap-2"
+                      className="w-full py-3 bg-gradient-to-r from-emerald-600 to-green-500 hover:from-emerald-500 hover:to-green-400 text-white font-black text-xs uppercase tracking-wider rounded-xl shadow-lg active:scale-95 transition-all text-center flex items-center justify-center gap-2"
                     >
                       {isSubmitting ? (
                         <span>VERIFYING OTP...</span>
                       ) : (
                         <>
-                          <CheckCircle2 className="w-4 h-4 text-stone-950" />
-                          <span>VERIFY & CONTINUE</span>
+                          <CheckCircle2 className="w-4 h-4 text-white" />
+                          <span>VERIFY & {isSignUp ? 'SIGN UP' : 'LOGIN'}</span>
                         </>
                       )}
                     </button>
@@ -765,86 +751,93 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               </div>
             )}
 
+            {/* METHOD 2: GMAIL / GOOGLE LOGIN */}
+            {authTab === 'GOOGLE' && (
+              <div className="bg-[#1f2429] border border-stone-700/80 rounded-3xl p-5 shadow-2xl text-left space-y-4 relative overflow-hidden">
+                <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-500 via-red-500 to-yellow-500" />
 
-
-            {/* Mode 3: Supabase Email */}
-            {authMode === 'EMAIL' && (
-              <div className="bg-[#8b0f19] border border-red-700/60 rounded-3xl p-5 shadow-2xl text-left">
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-sm font-extrabold text-white">
-                    {isSignUp ? 'Create Supabase Player Account' : 'Supabase Auth Sign In'}
-                  </h3>
-                  <button
-                    type="button"
-                    onClick={() => setIsSignUp(!isSignUp)}
-                    className="text-xs font-bold text-amber-300 underline"
-                  >
-                    {isSignUp ? 'Have Account? Login' : 'New? Sign Up'}
-                  </button>
+                <div className="text-center pt-2">
+                  <div className="w-12 h-12 rounded-2xl bg-white shadow-md mx-auto flex items-center justify-center mb-2">
+                    <svg className="w-7 h-7" viewBox="0 0 24 24">
+                      <path
+                        fill="#4285F4"
+                        d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                      />
+                      <path
+                        fill="#34A853"
+                        d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                      />
+                      <path
+                        fill="#FBBC05"
+                        d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+                      />
+                      <path
+                        fill="#EA4335"
+                        d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+                      />
+                    </svg>
+                  </div>
+                  <h3 className="text-base font-black text-white">Continue with Google</h3>
+                  <p className="text-[11px] text-stone-300 mt-0.5">
+                    Sign up or log in instantly using your verified Google / Gmail account.
+                  </p>
                 </div>
 
-                <form onSubmit={handleEmailAuth} className="space-y-3">
-                  {isSignUp && (
-                    <div className="bg-white rounded-xl p-2.5 flex items-center gap-2 shadow-inner">
-                      <User className="w-4 h-4 text-slate-400 shrink-0" />
-                      <input
-                        type="text"
-                        value={username}
-                        onChange={(e) => setUsername(e.target.value)}
-                        placeholder="Player username"
-                        className="w-full bg-transparent text-slate-900 font-bold text-xs focus:outline-hidden"
-                      />
-                    </div>
-                  )}
-
-                  <div className="bg-white rounded-xl p-2.5 flex items-center gap-2 shadow-inner">
-                    <Mail className="w-4 h-4 text-slate-400 shrink-0" />
+                {/* 18+ Mandatory Declaration Checkbox */}
+                <div className="p-2 rounded-xl bg-black/40 border border-red-500/30">
+                  <label className="flex items-start gap-2 cursor-pointer">
                     <input
-                      type="email"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      placeholder="Email address"
-                      className="w-full bg-transparent text-slate-900 font-bold text-xs focus:outline-hidden"
+                      type="checkbox"
+                      checked={is18PlusAgreed}
+                      onChange={(e) => setIs18PlusAgreed(e.target.checked)}
+                      className="mt-0.5 rounded text-amber-500 focus:ring-amber-400 w-4 h-4 shrink-0"
                     />
-                  </div>
-
-                  <div className="bg-white rounded-xl p-2.5 flex items-center gap-2 shadow-inner">
-                    <Lock className="w-4 h-4 text-slate-400 shrink-0" />
-                    <input
-                      type="password"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      placeholder="Password (min 6 chars)"
-                      className="w-full bg-transparent text-slate-900 font-bold text-xs focus:outline-hidden"
-                    />
-                  </div>
-
-                  <div className="p-2 rounded-xl bg-black/40 border border-red-500/30">
-                    <label className="flex items-start gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={is18PlusAgreed}
-                        onChange={(e) => setIs18PlusAgreed(e.target.checked)}
-                        className="mt-0.5 rounded text-amber-500 focus:ring-amber-400 w-4 h-4 shrink-0"
-                      />
-                      <span className="text-[10px] text-stone-200 font-semibold leading-tight">
-                        I confirm I am 18+ years of age.
+                    <span className="text-[11px] text-stone-200 font-semibold leading-tight">
+                      <span className="bg-red-700 text-white font-black text-[9px] px-1 py-0.2 rounded mr-1">
+                        18+
                       </span>
-                    </label>
-                  </div>
+                      I declare that I am <strong>18 years of age or older</strong> and agree to Master Rummy Terms.
+                    </span>
+                  </label>
+                </div>
 
-                  <button
-                    type="submit"
-                    disabled={isSubmitting}
-                    className="w-full py-3 bg-gradient-to-b from-[#22c55e] to-[#15803d] hover:from-[#16a34a] hover:to-[#166534] text-white font-black text-sm rounded-xl shadow-lg active:scale-95 transition-transform uppercase"
-                  >
-                    {isSubmitting
-                      ? 'AUTHENTICATING...'
-                      : isSignUp
-                      ? 'REGISTER & PLAY'
-                      : 'SIGN IN TO MASTER RUMMY'}
-                  </button>
-                </form>
+                {/* Continue with Google Action Button */}
+                <button
+                  type="button"
+                  onClick={handleGoogleSignIn}
+                  disabled={isGoogleSubmitting}
+                  className="w-full py-3.5 bg-white hover:bg-stone-100 text-slate-900 font-black text-xs uppercase tracking-wider rounded-xl shadow-lg active:scale-95 transition-all text-center flex items-center justify-center gap-2.5 border border-stone-300"
+                >
+                  {isGoogleSubmitting ? (
+                    <span>CONNECTING TO GOOGLE...</span>
+                  ) : (
+                    <>
+                      <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+                        <path
+                          fill="#4285F4"
+                          d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                        />
+                        <path
+                          fill="#34A853"
+                          d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                        />
+                        <path
+                          fill="#FBBC05"
+                          d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+                        />
+                        <path
+                          fill="#EA4335"
+                          d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+                        />
+                      </svg>
+                      <span>CONTINUE WITH GOOGLE</span>
+                    </>
+                  )}
+                </button>
+
+                <p className="text-[10px] text-stone-400 text-center">
+                  Safe & encrypted authentication powered by Google OAuth.
+                </p>
               </div>
             )}
 
@@ -873,13 +866,11 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       <div className="pt-2 pb-1 border-t border-red-950/60 text-center space-y-1.5 shrink-0">
         <div className="flex justify-center items-center gap-5 text-[10px] text-stone-300 font-semibold">
           <div className="flex items-center gap-1">
-            <span className="w-4 h-4 rounded-full bg-[#25D366] text-stone-950 flex items-center justify-center font-bold text-[8px]">
-              WA
-            </span>
-            <span>WhatsApp OTP Verified</span>
+            <Phone className="w-3.5 h-3.5 text-amber-400" />
+            <span>SMS OTP Verified</span>
           </div>
           <div className="flex items-center gap-1">
-            <ShieldCheck className="w-4 h-4 text-amber-400" />
+            <ShieldCheck className="w-4 h-4 text-emerald-400" />
             <span>Anti-Cheat RLS</span>
           </div>
           <div className="flex items-center gap-1">
@@ -889,7 +880,9 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         </div>
 
         <p className="text-[10px] text-white/70 max-w-xs mx-auto leading-tight">
-          <span className="bg-red-700 text-white font-black text-[9px] px-1 py-0.2 rounded mr-1">18+ ONLY</span>
+          <span className="bg-red-700 text-white font-black text-[9px] px-1 py-0.2 rounded mr-1">
+            18+ ONLY
+          </span>
           Participation is restricted to Indian adults aged 18 and above. Rummy is recognized as a game of skill by the Hon'ble Supreme Court of India.
         </p>
       </div>

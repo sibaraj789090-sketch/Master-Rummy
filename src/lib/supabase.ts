@@ -123,10 +123,242 @@ export const testSupabaseConnection = async (): Promise<{
 export interface SupabaseAuthUser {
   id: string;
   email?: string;
+  phone?: string;
   username: string;
   avatar: string;
   practiceChips: number;
+  authProvider?: 'PHONE_OTP' | 'GOOGLE' | 'EMAIL';
 }
+
+/**
+ * Send real SMS OTP to Indian mobile number (+91) using Supabase Auth.
+ * Supabase handles carrier delivery via configured SMS Provider (Twilio/MessageBird/Textlocal etc.).
+ */
+export const sendMobileOtp = async (
+  rawPhone: string
+): Promise<{ success: boolean; message?: string; error?: string }> => {
+  const cfg = getSupabaseConfig();
+  const cleanDigits = rawPhone.replace(/\D/g, '');
+
+  if (cleanDigits.length !== 10) {
+    return {
+      success: false,
+      error: 'Please enter a valid 10-digit mobile number (e.g., 9876543210).',
+    };
+  }
+
+  const fullE164Phone = `+91${cleanDigits}`;
+
+  if (!cfg.isConfigured) {
+    return {
+      success: false,
+      error:
+        'Supabase configuration required. Please provide VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to dispatch live SMS OTPs.',
+    };
+  }
+
+  try {
+    const { error } = await supabase.auth.signInWithOtp({
+      phone: fullE164Phone,
+      options: {
+        channel: 'sms',
+      },
+    });
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    return {
+      success: true,
+      message: `SMS OTP has been dispatched to +91 ${cleanDigits}. Please enter the 6-digit code received on your phone.`,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err?.message || 'Failed to dispatch SMS OTP. Please try again.',
+    };
+  }
+};
+
+/**
+ * Verify real SMS OTP code with Supabase Auth and link/create player profile.
+ */
+export const verifyMobileOtp = async (
+  rawPhone: string,
+  token: string,
+  playerName?: string
+): Promise<{ user?: SupabaseAuthUser; error?: string }> => {
+  const cfg = getSupabaseConfig();
+  const cleanDigits = rawPhone.replace(/\D/g, '');
+  const fullE164Phone = `+91${cleanDigits}`;
+  const cleanOtp = token.trim();
+
+  if (cleanOtp.length < 6) {
+    return { error: 'Please enter the complete 6-digit OTP received via SMS.' };
+  }
+
+  if (!cfg.isConfigured) {
+    return {
+      error:
+        'Supabase is not configured. Live SMS verification requires active Supabase project credentials.',
+    };
+  }
+
+  try {
+    const { data, error } = await supabase.auth.verifyOtp({
+      phone: fullE164Phone,
+      token: cleanOtp,
+      type: 'sms',
+    });
+
+    if (error) {
+      return { error: error.message };
+    }
+
+    const supaUser = data.user;
+    if (!supaUser) {
+      return { error: 'No user record returned from authentication provider.' };
+    }
+
+    const defaultAvatar =
+      'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&q=80';
+    const finalUsername =
+      playerName?.trim() ||
+      supaUser.user_metadata?.username ||
+      `Player_${cleanDigits.slice(-4)}`;
+
+    // Sync or create player profile in Supabase profiles table
+    try {
+      await supabase.from('profiles').upsert({
+        id: supaUser.id,
+        username: finalUsername,
+        phone: cleanDigits,
+        avatar: defaultAvatar,
+        practice_chips: 10000,
+      });
+    } catch {}
+
+    const authUser: SupabaseAuthUser = {
+      id: supaUser.id,
+      phone: cleanDigits,
+      username: finalUsername,
+      avatar: defaultAvatar,
+      practiceChips: 10000,
+      authProvider: 'PHONE_OTP',
+    };
+
+    localStorage.setItem('master_rummy_active_auth_user', JSON.stringify(authUser));
+    return { user: authUser };
+  } catch (err: any) {
+    return { error: err?.message || 'Verification failed. Please check the code and try again.' };
+  }
+};
+
+/**
+ * Sign in or Sign up with Google OAuth via Supabase Auth
+ */
+export const signInWithGoogle = async (): Promise<{ error?: string }> => {
+  const cfg = getSupabaseConfig();
+
+  if (!cfg.isConfigured) {
+    return {
+      error:
+        'Supabase is not configured. Google Sign-In requires active Supabase credentials with Google OAuth enabled.',
+    };
+  }
+
+  try {
+    const redirectUrl = typeof window !== 'undefined' ? window.location.origin : undefined;
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: redirectUrl,
+        queryParams: {
+          access_type: 'offline',
+          prompt: 'select_account',
+        },
+      },
+    });
+
+    if (error) {
+      return { error: error.message };
+    }
+
+    return {};
+  } catch (err: any) {
+    return { error: err?.message || 'Failed to start Google sign-in flow.' };
+  }
+};
+
+/**
+ * Fetches active Supabase session user (used after Google OAuth redirect or app startup)
+ */
+export const getActiveSupabaseUser = async (): Promise<SupabaseAuthUser | null> => {
+  const cfg = getSupabaseConfig();
+  if (!cfg.isConfigured) {
+    return getSavedAuthUser();
+  }
+
+  try {
+    const { data: { session }, error } = await supabase.auth.getSession();
+    if (error || !session?.user) {
+      return getSavedAuthUser();
+    }
+
+    const supaUser = session.user;
+    const phone = supaUser.phone ? supaUser.phone.replace(/^\+91/, '').replace(/\D/g, '') : undefined;
+    const email = supaUser.email;
+    const isGoogle = supaUser.app_metadata?.provider === 'google' || supaUser.user_metadata?.iss?.includes('google');
+
+    let username =
+      supaUser.user_metadata?.full_name ||
+      supaUser.user_metadata?.name ||
+      (email ? email.split('@')[0] : `Player_${supaUser.id.slice(-4)}`);
+    let avatar =
+      supaUser.user_metadata?.avatar_url ||
+      supaUser.user_metadata?.picture ||
+      'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&q=80';
+    let practiceChips = 10000;
+
+    try {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', supaUser.id)
+        .maybeSingle();
+
+      if (profile) {
+        if (profile.username) username = profile.username;
+        if (profile.avatar) avatar = profile.avatar;
+        if (profile.practice_chips) practiceChips = Number(profile.practice_chips);
+      } else {
+        await supabase.from('profiles').upsert({
+          id: supaUser.id,
+          username,
+          phone: phone || '',
+          avatar,
+          practice_chips: practiceChips,
+        });
+      }
+    } catch {}
+
+    const authUser: SupabaseAuthUser = {
+      id: supaUser.id,
+      email,
+      phone,
+      username,
+      avatar,
+      practiceChips,
+      authProvider: isGoogle ? 'GOOGLE' : phone ? 'PHONE_OTP' : undefined,
+    };
+
+    localStorage.setItem('master_rummy_active_auth_user', JSON.stringify(authUser));
+    return authUser;
+  } catch {
+    return getSavedAuthUser();
+  }
+};
 
 export const signUpWithEmail = async (
   email: string,

@@ -1021,7 +1021,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
               </div>
               <div className="flex items-center gap-2 text-stone-300">
                 <Check className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>Fast 10-Second WhatsApp / Mobile Verification</span>
+                <span>Fast 10-Second SMS OTP or Google Login</span>
               </div>
               <div className="flex items-center gap-2 text-stone-300">
                 <Check className="w-4 h-4 text-emerald-400 shrink-0" />
