@@ -43,7 +43,9 @@ export class ErrorBoundary extends Component<Props, State> {
 
   handleReturnToLobby = () => {
     this.setState({ hasError: false, error: null, errorInfo: null });
-    if (typeof window !== 'undefined') {
+    if (this.props.onReset) {
+      this.props.onReset();
+    } else if (typeof window !== 'undefined') {
       window.location.href = '/';
     }
   };

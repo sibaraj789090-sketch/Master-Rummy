@@ -483,68 +483,91 @@ class MultiplayerService {
       onPlayersChange?: (players: RoomPlayer[]) => void;
       onSessionChange?: (session: GameSession) => void;
     }
-  ) {
+  ): () => void {
     const config = getSupabaseConfig();
+    let supabaseChannel: any = null;
 
     if (config.isConfigured) {
-      const channel = supabase
-        .channel(`room_${roomId}`)
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'game_rooms', filter: `id=eq.${roomId}` },
-          (payload) => {
-            if (callbacks.onRoomChange && payload.new) {
-              callbacks.onRoomChange(payload.new as GameRoom);
+      try {
+        // Clean up any pre-existing channel with this room prefix to prevent Supabase Realtime "cannot add callbacks after subscribe()"
+        try {
+          const channels = supabase.getChannels();
+          for (const ch of channels) {
+            if (ch.topic && ch.topic.includes(`room_${roomId}`)) {
+              supabase.removeChannel(ch);
             }
           }
-        )
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'room_players', filter: `room_id=eq.${roomId}` },
-          async () => {
-            if (callbacks.onPlayersChange) {
-              const { data } = await supabase
-                .from('room_players')
-                .select('*')
-                .eq('room_id', roomId)
-                .order('seat_index');
-              if (data) callbacks.onPlayersChange(data as RoomPlayer[]);
-            }
-          }
-        )
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'game_sessions', filter: `room_id=eq.${roomId}` },
-          (payload) => {
-            if (callbacks.onSessionChange && payload.new) {
-              callbacks.onSessionChange(payload.new as GameSession);
-            }
-          }
-        )
-        .subscribe();
+        } catch (cleanupErr) {
+          console.warn('Channel cleanup warning:', cleanupErr);
+        }
 
-      return () => {
-        supabase.removeChannel(channel);
-      };
+        // Always create with a unique channel name for this subscription instance
+        const channelName = `room_${roomId}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+        supabaseChannel = supabase
+          .channel(channelName)
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'game_rooms', filter: `id=eq.${roomId}` },
+            (payload) => {
+              if (callbacks.onRoomChange && payload.new) {
+                callbacks.onRoomChange(payload.new as GameRoom);
+              }
+            }
+          )
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'room_players', filter: `room_id=eq.${roomId}` },
+            async () => {
+              if (callbacks.onPlayersChange) {
+                try {
+                  const { data } = await supabase
+                    .from('room_players')
+                    .select('*')
+                    .eq('room_id', roomId)
+                    .order('seat_index');
+                  if (data) callbacks.onPlayersChange(data as RoomPlayer[]);
+                } catch (fetchErr) {
+                  console.warn('Error fetching room players on change:', fetchErr);
+                }
+              }
+            }
+          )
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'game_sessions', filter: `room_id=eq.${roomId}` },
+            (payload) => {
+              if (callbacks.onSessionChange && payload.new) {
+                callbacks.onSessionChange(payload.new as GameSession);
+              }
+            }
+          )
+          .subscribe();
+      } catch (err) {
+        console.warn('Realtime subscribeToRoom encountered an error:', err);
+      }
     }
 
     // Local / cross-tab broadcast subscription
     const handler = (e: MessageEvent) => {
-      const { type, payload } = e.data;
-      if (type === 'ROOM_UPDATED' && payload.id === roomId && callbacks.onRoomChange) {
-        callbacks.onRoomChange(payload);
-      } else if (
-        type === 'PLAYERS_UPDATED' &&
-        payload.roomId === roomId &&
-        callbacks.onPlayersChange
-      ) {
-        callbacks.onPlayersChange(payload.players);
-      } else if (
-        type === 'SESSION_UPDATED' &&
-        payload.room_id === roomId &&
-        callbacks.onSessionChange
-      ) {
-        callbacks.onSessionChange(payload);
+      try {
+        const { type, payload } = e.data || {};
+        if (type === 'ROOM_UPDATED' && payload?.id === roomId && callbacks.onRoomChange) {
+          callbacks.onRoomChange(payload);
+        } else if (
+          type === 'PLAYERS_UPDATED' &&
+          payload?.roomId === roomId &&
+          callbacks.onPlayersChange
+        ) {
+          callbacks.onPlayersChange(payload.players);
+        } else if (
+          type === 'SESSION_UPDATED' &&
+          payload?.room_id === roomId &&
+          callbacks.onSessionChange
+        ) {
+          callbacks.onSessionChange(payload);
+        }
+      } catch (handlerErr) {
+        console.warn('Error in room broadcast handler:', handlerErr);
       }
     };
 
@@ -553,8 +576,19 @@ class MultiplayerService {
     }
 
     return () => {
+      if (supabaseChannel) {
+        try {
+          supabase.removeChannel(supabaseChannel);
+        } catch (e) {
+          console.warn('Error removing room Supabase channel:', e);
+        }
+      }
       if (broadcastChannel) {
-        broadcastChannel.removeEventListener('message', handler);
+        try {
+          broadcastChannel.removeEventListener('message', handler);
+        } catch (e) {
+          // ignore
+        }
       }
     };
   }
@@ -1190,45 +1224,63 @@ class MultiplayerService {
       onMove?: (move: any) => void;
       onFinished?: (winnerId: string) => void;
     }
-  ) {
+  ): () => void {
     const config = getSupabaseConfig();
+    let supabaseChannel: any = null;
 
     if (config.isConfigured) {
-      const channel = supabase
-        .channel(`session_${sessionId}`)
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'game_sessions', filter: `id=eq.${sessionId}` },
-          (payload) => {
-            if (callbacks.onSessionChange && payload.new) {
-              callbacks.onSessionChange(payload.new as GameSession);
+      try {
+        // Clean up any pre-existing channel with this session prefix to prevent Supabase Realtime "cannot add callbacks after subscribe()"
+        try {
+          const channels = supabase.getChannels();
+          for (const ch of channels) {
+            if (ch.topic && ch.topic.includes(`session_${sessionId}`)) {
+              supabase.removeChannel(ch);
             }
           }
-        )
-        .on(
-          'postgres_changes',
-          { event: 'INSERT', schema: 'public', table: 'game_moves', filter: `session_id=eq.${sessionId}` },
-          (payload) => {
-            if (callbacks.onMove && payload.new) {
-              callbacks.onMove(payload.new);
-            }
-          }
-        )
-        .subscribe();
+        } catch (cleanupErr) {
+          console.warn('Session channel cleanup warning:', cleanupErr);
+        }
 
-      return () => {
-        supabase.removeChannel(channel);
-      };
+        const channelName = `session_${sessionId}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+        supabaseChannel = supabase
+          .channel(channelName)
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'game_sessions', filter: `id=eq.${sessionId}` },
+            (payload) => {
+              if (callbacks.onSessionChange && payload.new) {
+                callbacks.onSessionChange(payload.new as GameSession);
+              }
+            }
+          )
+          .on(
+            'postgres_changes',
+            { event: 'INSERT', schema: 'public', table: 'game_moves', filter: `session_id=eq.${sessionId}` },
+            (payload) => {
+              if (callbacks.onMove && payload.new) {
+                callbacks.onMove(payload.new);
+              }
+            }
+          )
+          .subscribe();
+      } catch (err) {
+        console.warn('Realtime subscribeToSession encountered an error:', err);
+      }
     }
 
     const handler = (e: MessageEvent) => {
-      const { type, payload } = e.data;
-      if (type === 'SESSION_UPDATED' && payload.id === sessionId && callbacks.onSessionChange) {
-        callbacks.onSessionChange(payload);
-      } else if (type === 'MOVE_LOGGED' && payload.sessionId === sessionId && callbacks.onMove) {
-        callbacks.onMove(payload);
-      } else if (type === 'GAME_FINISHED' && payload.sessionId === sessionId && callbacks.onFinished) {
-        callbacks.onFinished(payload.winnerUserId);
+      try {
+        const { type, payload } = e.data || {};
+        if (type === 'SESSION_UPDATED' && payload?.id === sessionId && callbacks.onSessionChange) {
+          callbacks.onSessionChange(payload);
+        } else if (type === 'MOVE_LOGGED' && payload?.sessionId === sessionId && callbacks.onMove) {
+          callbacks.onMove(payload);
+        } else if (type === 'GAME_FINISHED' && payload?.sessionId === sessionId && callbacks.onFinished) {
+          callbacks.onFinished(payload.winnerUserId);
+        }
+      } catch (handlerErr) {
+        console.warn('Error in session broadcast handler:', handlerErr);
       }
     };
 
@@ -1237,8 +1289,19 @@ class MultiplayerService {
     }
 
     return () => {
+      if (supabaseChannel) {
+        try {
+          supabase.removeChannel(supabaseChannel);
+        } catch (e) {
+          console.warn('Error removing session Supabase channel:', e);
+        }
+      }
       if (broadcastChannel) {
-        broadcastChannel.removeEventListener('message', handler);
+        try {
+          broadcastChannel.removeEventListener('message', handler);
+        } catch (e) {
+          // ignore
+        }
       }
     };
   }

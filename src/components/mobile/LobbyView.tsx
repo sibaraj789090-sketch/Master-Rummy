@@ -173,7 +173,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
       setRoomPlayers([player]);
 
       // Subscribe to Realtime room updates
-      multiplayerService.subscribeToRoom(room.id, {
+      const unsubRoom = multiplayerService.subscribeToRoom(room.id, {
         onPlayersChange: (players) => {
           setRoomPlayers(players);
           if (players.length >= 2) {
@@ -185,6 +185,11 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
 
       // Launch session
       setTimeout(async () => {
+        try {
+          if (unsubRoom) unsubRoom();
+        } catch (e) {
+          // ignore
+        }
         setMatchingStatus('Dealing 13 cards...');
         const session = await multiplayerService.startSession(room.id);
         setMultiplayerState(room, player, session);

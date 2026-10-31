@@ -224,6 +224,10 @@ export const RummyTable: React.FC = () => {
   const [wildJokerSuit, setWildJokerSuit] = useState<Suit>('diamonds');
   const [closedDeck, setClosedDeck] = useState<PlayingCard[]>([]);
   const [openDiscardPile, setOpenDiscardPile] = useState<PlayingCard[]>([]);
+  const openDiscardPileRef = useRef<PlayingCard[]>(openDiscardPile);
+  useEffect(() => {
+    openDiscardPileRef.current = openDiscardPile;
+  }, [openDiscardPile]);
 
   // 13 Cards in Meld Groups
   const [cardGroups, setCardGroups] = useState<PlayingCard[][]>([]);
@@ -1167,7 +1171,7 @@ export const RummyTable: React.FC = () => {
           });
         } else if (moveType === 'DRAW_OPEN') {
           sounds.playCardDeal();
-          const cardToDraw = moveCard || openDiscardPile[0];
+          const cardToDraw = moveCard || openDiscardPileRef.current[0];
           setOpenDiscardPile((prev) => prev.slice(1));
           setSeats((prev) =>
             prev.map((s, idx) =>
@@ -1269,9 +1273,15 @@ export const RummyTable: React.FC = () => {
     });
 
     return () => {
-      unsubscribe();
+      if (typeof unsubscribe === 'function') {
+        try {
+          unsubscribe();
+        } catch (e) {
+          console.warn('Error unsubscribing session:', e);
+        }
+      }
     };
-  }, [isMultiplayer, multiplayerSession?.id, currentUser?.id, openDiscardPile]);
+  }, [isMultiplayer, multiplayerSession?.id, currentUser?.id]);
 
   // Synchronize Room Players in Multiplayer so human opponents are accurately shown
   useEffect(() => {
@@ -1348,7 +1358,13 @@ export const RummyTable: React.FC = () => {
     });
 
     return () => {
-      unsubRoom();
+      if (typeof unsubRoom === 'function') {
+        try {
+          unsubRoom();
+        } catch (e) {
+          console.warn('Error unsubscribing room:', e);
+        }
+      }
     };
   }, [isMultiplayer, multiplayerRoom?.id, currentUser?.id]);
 
