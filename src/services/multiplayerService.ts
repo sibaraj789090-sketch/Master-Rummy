@@ -217,6 +217,26 @@ class MultiplayerService {
     return { success: true, player: newPlayer };
   }
 
+  // 2b. Get Room Players
+  async getRoomPlayers(roomId: string): Promise<RoomPlayer[]> {
+    const config = getSupabaseConfig();
+    if (config.isConfigured) {
+      try {
+        const { data, error } = await supabase
+          .from('room_players')
+          .select('*')
+          .eq('room_id', roomId)
+          .order('seat_index', { ascending: true });
+        if (!error && data && data.length > 0) {
+          return data as RoomPlayer[];
+        }
+      } catch (err) {
+        console.warn('Supabase getRoomPlayers fallback:', err);
+      }
+    }
+    return this.localPlayers.get(roomId) || [];
+  }
+
   // 3. Leave Room
   async leaveRoom(roomId: string, userId: string): Promise<void> {
     const config = getSupabaseConfig();
@@ -694,7 +714,7 @@ class MultiplayerService {
           user_id: userId,
           seat_index: playerState.seat_index,
           move_type: from === 'CLOSED' ? 'DRAW_CLOSED' : 'DRAW_OPEN',
-          card_data: drawnCard,
+          card_data: from === 'CLOSED' ? null : drawnCard,
         });
       } catch (err) {
         console.warn('Supabase drawCard sync fallback:', err);
@@ -705,7 +725,13 @@ class MultiplayerService {
       broadcastChannel.postMessage({ type: 'SESSION_UPDATED', payload: session });
       broadcastChannel.postMessage({
         type: 'MOVE_LOGGED',
-        payload: { sessionId, userId, moveType: from === 'CLOSED' ? 'DRAW_CLOSED' : 'DRAW_OPEN', card: drawnCard },
+        payload: {
+          sessionId,
+          userId,
+          moveType: from === 'CLOSED' ? 'DRAW_CLOSED' : 'DRAW_OPEN',
+          card: from === 'CLOSED' ? undefined : drawnCard,
+          seatIndex: playerState.seat_index,
+        },
       });
     }
 
@@ -779,7 +805,14 @@ class MultiplayerService {
       broadcastChannel.postMessage({ type: 'SESSION_UPDATED', payload: session });
       broadcastChannel.postMessage({
         type: 'MOVE_LOGGED',
-        payload: { sessionId, userId, moveType: 'DISCARD', card, nextTurnSeat: nextTurn },
+        payload: {
+          sessionId,
+          userId,
+          moveType: 'DISCARD',
+          card,
+          seatIndex: playerState.seat_index,
+          nextTurnSeat: nextTurn,
+        },
       });
     }
 

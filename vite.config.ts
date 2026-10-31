@@ -26,6 +26,9 @@ export default defineConfig(() => {
           type: 'module',
         },
         manifest: false, // We supply /manifest.json directly
+        workbox: {
+          maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
+        },
       }),
       {
         name: 'apk-downloader-middleware',

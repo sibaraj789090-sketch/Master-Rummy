@@ -27,6 +27,7 @@ import {
   shouldBotTakeDiscardCard,
   chooseBotOptimalDiscard,
   shouldBotDeclareWin,
+  shouldBotDropHand,
   getRandomBotChat,
 } from '../../utils/botEngine';
 import { sounds } from '../../utils/sound';
@@ -55,7 +56,11 @@ import {
   Undo2,
   ZoomOut,
   ZoomIn,
+  BookOpen,
+  HelpCircle,
 } from 'lucide-react';
+import { HowToPlayModal } from './HowToPlayModal';
+import { motion, AnimatePresence } from 'framer-motion';
 import { multiplayerService } from '../../services/multiplayerService';
 import { ScreenOrientation } from '@capacitor/screen-orientation';
 
@@ -72,6 +77,7 @@ interface SeatPlayer {
   turnsCount: number;
   isDealer?: boolean;
   activeChat?: string | null;
+  actionStatus?: string | null;
 }
 
 // Generate realistic human-like opponents dynamically from 100k+ bot pool
@@ -90,6 +96,7 @@ const createTableOpponents = (count: number, variant: string, fee: number): Seat
     turnsCount: 0,
     isDealer: false,
     activeChat: null,
+    actionStatus: null,
   }));
 };
 
@@ -255,6 +262,7 @@ export const RummyTable: React.FC = () => {
   // Modals
   const [showScoreWindow, setShowScoreWindow] = useState<boolean>(false);
   const [showInGameMenu, setShowInGameMenu] = useState<boolean>(false);
+  const [showHowToPlay, setShowHowToPlay] = useState<boolean>(false);
   const [showChatDrawer, setShowChatDrawer] = useState<boolean>(false);
   const [showDropConfirmModal, setShowDropConfirmModal] = useState<boolean>(false);
   const [playerChatBubble, setPlayerChatBubble] = useState<string | null>(null);
@@ -312,12 +320,166 @@ export const RummyTable: React.FC = () => {
 
   // Hidden server-side simulated card hands for each opponent
   const opponentHandsRef = useRef<Record<string, PlayingCard[]>>({});
+  const prevPlayerIdsRef = useRef<string[]>([]);
 
   // Active Seats state dynamically generated from 100k+ realistic bot pool
   const [seats, setSeats] = useState<SeatPlayer[]>(() => {
     const oppCount = activeGameConfig?.playersCount === 2 ? 1 : 5;
     return createTableOpponents(oppCount, gameVariant, entryFee);
   });
+
+  // Active Flying Card Animation State
+  const [activeFlyAnimation, setActiveFlyAnimation] = useState<{
+    id: string;
+    type: 'DRAW_CLOSED' | 'DRAW_OPEN' | 'DISCARD';
+    card?: PlayingCard;
+    isFaceDown: boolean;
+    startX: number;
+    startY: number;
+    endX: number;
+    endY: number;
+    currentX: number;
+    currentY: number;
+    isAnimated: boolean;
+    actorName: string;
+    actorSeatIndex: number;
+  } | null>(null);
+
+  const [discardLandedHighlight, setDiscardLandedHighlight] = useState<boolean>(false);
+
+  // Table DOM Element References for Responsive 60FPS Flying Coordinates
+  const tableContainerRef = useRef<HTMLDivElement | null>(null);
+  const closedDeckRef = useRef<HTMLDivElement | null>(null);
+  const discardPileRef = useRef<HTMLDivElement | null>(null);
+  const finishSlotRef = useRef<HTMLDivElement | null>(null);
+  const playerHandRef = useRef<HTMLDivElement | null>(null);
+  const opponentSeatRefs = useRef<{ [seatIndex: number]: HTMLDivElement | null }>({});
+
+  // Dynamic Percentage Coordinates calculation relative to table container
+  const getSeatCoords = (seatIndex: number): { x: number; y: number } => {
+    if (seatIndex === 0) {
+      if (tableContainerRef.current && playerHandRef.current) {
+        const tableRect = tableContainerRef.current.getBoundingClientRect();
+        const handRect = playerHandRef.current.getBoundingClientRect();
+        if (tableRect.width > 0 && tableRect.height > 0) {
+          return {
+            x: Math.round(((handRect.left + handRect.width / 2 - tableRect.left) / tableRect.width) * 100),
+            y: Math.round(((handRect.top + handRect.height / 3 - tableRect.top) / tableRect.height) * 100),
+          };
+        }
+      }
+      return { x: 50, y: 84 };
+    }
+
+    const el = opponentSeatRefs.current[seatIndex];
+    if (tableContainerRef.current && el) {
+      const tableRect = tableContainerRef.current.getBoundingClientRect();
+      const elRect = el.getBoundingClientRect();
+      if (tableRect.width > 0 && tableRect.height > 0) {
+        return {
+          x: Math.round(((elRect.left + elRect.width / 2 - tableRect.left) / tableRect.width) * 100),
+          y: Math.round(((elRect.top + elRect.height / 2 - tableRect.top) / tableRect.height) * 100),
+        };
+      }
+    }
+
+    if (playersMode === 2) {
+      return { x: 50, y: 15 };
+    }
+    const defaultX = [12, 31, 50, 69, 88];
+    return { x: defaultX[seatIndex - 1] ?? 50, y: 15 };
+  };
+
+  const getClosedDeckCoords = (): { x: number; y: number } => {
+    if (tableContainerRef.current && closedDeckRef.current) {
+      const tableRect = tableContainerRef.current.getBoundingClientRect();
+      const rect = closedDeckRef.current.getBoundingClientRect();
+      if (tableRect.width > 0 && tableRect.height > 0) {
+        return {
+          x: Math.round(((rect.left + rect.width / 2 - tableRect.left) / tableRect.width) * 100),
+          y: Math.round(((rect.top + rect.height / 2 - tableRect.top) / tableRect.height) * 100),
+        };
+      }
+    }
+    return { x: 42, y: 50 };
+  };
+
+  const getDiscardPileCoords = (): { x: number; y: number } => {
+    if (tableContainerRef.current && discardPileRef.current) {
+      const tableRect = tableContainerRef.current.getBoundingClientRect();
+      const rect = discardPileRef.current.getBoundingClientRect();
+      if (tableRect.width > 0 && tableRect.height > 0) {
+        return {
+          x: Math.round(((rect.left + rect.width / 2 - tableRect.left) / tableRect.width) * 100),
+          y: Math.round(((rect.top + rect.height / 2 - tableRect.top) / tableRect.height) * 100),
+        };
+      }
+    }
+    return { x: 58, y: 50 };
+  };
+
+  const getFinishSlotCoords = (): { x: number; y: number } => {
+    if (tableContainerRef.current && finishSlotRef.current) {
+      const tableRect = tableContainerRef.current.getBoundingClientRect();
+      const rect = finishSlotRef.current.getBoundingClientRect();
+      if (tableRect.width > 0 && tableRect.height > 0) {
+        return {
+          x: Math.round(((rect.left + rect.width / 2 - tableRect.left) / tableRect.width) * 100),
+          y: Math.round(((rect.top + rect.height / 2 - tableRect.top) / tableRect.height) * 100),
+        };
+      }
+    }
+    return { x: 50, y: 50 };
+  };
+
+  const triggerCardAnimation = (params: {
+    type: 'DRAW_CLOSED' | 'DRAW_OPEN' | 'DISCARD';
+    fromCoords: { x: number; y: number };
+    toCoords: { x: number; y: number };
+    card?: PlayingCard;
+    isFaceDown: boolean;
+    actorName: string;
+    actorSeatIndex: number;
+    onComplete?: () => void;
+  }) => {
+    const animId = `fly_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    setActiveFlyAnimation({
+      id: animId,
+      type: params.type,
+      card: params.card,
+      isFaceDown: params.isFaceDown,
+      startX: params.fromCoords.x,
+      startY: params.fromCoords.y,
+      endX: params.toCoords.x,
+      endY: params.toCoords.y,
+      currentX: params.fromCoords.x,
+      currentY: params.fromCoords.y,
+      isAnimated: false,
+      actorName: params.actorName,
+      actorSeatIndex: params.actorSeatIndex,
+    });
+
+    // Start smooth transition on next tick
+    const startTimer = setTimeout(() => {
+      setActiveFlyAnimation((prev) =>
+        prev && prev.id === animId
+          ? { ...prev, currentX: params.toCoords.x, currentY: params.toCoords.y, isAnimated: true }
+          : prev
+      );
+    }, 25);
+
+    const endTimer = setTimeout(() => {
+      setActiveFlyAnimation((prev) => (prev && prev.id === animId ? null : prev));
+      if (params.onComplete) {
+        params.onComplete();
+      }
+    }, 560);
+
+    return () => {
+      clearTimeout(startTimer);
+      clearTimeout(endTimer);
+    };
+  };
 
   // Calculate current drop penalty for user
   const isMiddleDrop = userTurnsInRound > 0;
@@ -621,7 +783,7 @@ export const RummyTable: React.FC = () => {
     return () => clearInterval(timer);
   }, [gameStarted, tossState.phase, currentTurnSeat, hasDrawnCard, playerDropped, winModalData, roundCompleteModalData, seats.length]);
 
-  // Opponent Bot Turn Simulator
+  // Opponent Bot Turn Simulator with Real-Time Animated Draw & Discard
   useEffect(() => {
     if (!gameStarted || tossState.phase !== 'COMPLETE' || currentTurnSeat === 0 || winModalData || roundCompleteModalData) return;
     if (isMultiplayer) return;
@@ -634,11 +796,75 @@ export const RummyTable: React.FC = () => {
     }
 
     const botHand = opponentHandsRef.current[bot.id] || [];
-    const thinkDelayTime = Math.max(800, (botSettings?.turnDelaySeconds || 1.6) * 1000);
+    // Realistic human-like thinking delay between 1.8s and 3.6s (timer visibly ticks within 30s)
+    const baseDelay = (botSettings?.turnDelaySeconds || 2.0) * 1000;
+    const thinkDelayTime = Math.min(5000, Math.max(1600, baseDelay + (Math.random() * 1000 - 300)));
+
+    // 0. Realistic thinking status labels
+    const thinkingLabels = ['Analyzing cards...', 'Calculating melds...', 'Evaluating discard...', 'Thinking...'];
+    const chosenThinkingLabel = thinkingLabels[Math.floor(Math.random() * thinkingLabels.length)];
+
+    setSeats((prev) =>
+      prev.map((s, idx) => (idx === botIndex ? { ...s, actionStatus: chosenThinkingLabel } : s))
+    );
 
     const thinkDelay = setTimeout(() => {
-      // 1. DRAW PHASE: Smart pick from open discard pile or closed deck
-      let botDrawnCard: PlayingCard;
+      // 1. STRATEGIC DROP EVALUATION (First Drop or Middle Drop)
+      const dropEval = shouldBotDropHand({
+        botTurnsCount: bot.turnsCount,
+        botHand,
+        wildJokerRank,
+        dropProbabilityPercent: botSettings?.dropProbabilityPercent ?? 8,
+        gameVariant,
+        forceWinner: botSettings?.forceNextWinner ?? 'NONE',
+      });
+
+      if (dropEval.shouldDrop) {
+        const isMiddle = dropEval.isMiddleDrop;
+        const penalty = isMiddle ? modeConfig.middleDropPenalty : modeConfig.firstDropPenalty;
+        sounds.playCardClick();
+
+        setSeats((prev) =>
+          prev.map((s, idx) =>
+            idx === botIndex
+              ? {
+                  ...s,
+                  status: 'DROPPED',
+                  actionStatus: isMiddle ? 'Middle Drop (40 pts)' : 'First Drop (20 pts)',
+                  roundScore: penalty,
+                  cumulativeScore: s.cumulativeScore + penalty,
+                }
+              : s
+          )
+        );
+
+        showTableToast(`${bot.name} folded hand (${isMiddle ? 'Middle Drop' : 'First Drop'} +${penalty} pts)`, 'warn');
+
+        // Check if only 1 active player remains at table
+        setTimeout(() => {
+          setSeats((currentSeats) => {
+            const activeBots = currentSeats.filter((s) => s.status === 'PLAYING');
+            const isUserActive = !playerDropped && !playerEliminated;
+
+            if (isUserActive && activeBots.length === 0) {
+              // User is sole remaining player -> User WINS!
+              showTableToast('All opponents folded! You win the table!', 'success');
+              handleConcludeRoundOrDeal(currentUser.id, true);
+            } else if (!isUserActive && activeBots.length === 1) {
+              // 1 bot left -> that bot wins
+              handleConcludeRoundOrDeal(activeBots[0].id, false);
+            } else {
+              advanceTurn();
+            }
+            return currentSeats;
+          });
+        }, 1100);
+
+        return;
+      }
+
+      // 2. DRAW PHASE: Smart pick from open discard pile or closed deck
+      const botSeatIndex = botIndex + 1;
       const shouldPickOpen =
         openDiscardPile.length > 0 &&
         shouldBotTakeDiscardCard(
@@ -648,22 +874,88 @@ export const RummyTable: React.FC = () => {
           botSettings?.smartDrawEnabled ?? true
         );
 
+      let botDrawnCard: PlayingCard;
+
       if (shouldPickOpen) {
-        sounds.playCardDeal();
         botDrawnCard = openDiscardPile[0];
         setOpenDiscardPile((prev) => prev.slice(1));
-      } else if (closedDeck.length > 0) {
         sounds.playCardDeal();
-        botDrawnCard = closedDeck[0];
-        setClosedDeck((prev) => prev.slice(1));
+
+        // Update bot action label
+        setSeats((prev) =>
+          prev.map((s, idx) =>
+            idx === botIndex
+              ? {
+                  ...s,
+                  actionStatus: 'Drawing from Discard Pile...',
+                  cardsCount: s.cardsCount + 1,
+                }
+              : s
+          )
+        );
+
+        // Smooth flight animation: card moving from discard pile to bot hand
+        triggerCardAnimation({
+          type: 'DRAW_OPEN',
+          card: botDrawnCard,
+          isFaceDown: false,
+          fromCoords: getDiscardPileCoords(),
+          toCoords: getSeatCoords(botSeatIndex),
+          actorName: bot.name,
+          actorSeatIndex: botSeatIndex,
+          onComplete: () => {
+            setSeats((prev) =>
+              prev.map((s, idx) =>
+                idx === botIndex
+                  ? {
+                      ...s,
+                      actionStatus: `Picked ${botDrawnCard.rank}${getSuitSymbol(botDrawnCard.suit)}`,
+                    }
+                  : s
+              )
+            );
+          },
+        });
       } else {
-        botDrawnCard = {
-          id: `bot_card_${Date.now()}`,
-          rank: '8',
-          suit: 'clubs',
-          value: 8,
-          points: 8,
-        };
+        if (closedDeck.length > 0) {
+          botDrawnCard = closedDeck[0];
+          setClosedDeck((prev) => prev.slice(1));
+        } else {
+          botDrawnCard = {
+            id: `bot_card_${Date.now()}`,
+            rank: '8',
+            suit: 'clubs',
+            value: 8,
+            points: 8,
+          };
+        }
+        sounds.playCardDeal();
+
+        // Update bot action label
+        setSeats((prev) =>
+          prev.map((s, idx) =>
+            idx === botIndex
+              ? {
+                  ...s,
+                  actionStatus: 'Drawing card...',
+                  cardsCount: s.cardsCount + 1,
+                }
+              : s
+          )
+        );
+
+        // Smooth flight animation: card back moving from closed deck to bot hand
+        triggerCardAnimation({
+          type: 'DRAW_CLOSED',
+          isFaceDown: true,
+          fromCoords: getClosedDeckCoords(),
+          toCoords: getSeatCoords(botSeatIndex),
+          actorName: bot.name,
+          actorSeatIndex: botSeatIndex,
+          onComplete: () => {
+            // Keep hidden hand private
+          },
+        });
       }
 
       const updatedBotHand = [...botHand, botDrawnCard];
@@ -674,7 +966,7 @@ export const RummyTable: React.FC = () => {
         prev.map((s, idx) => (idx === botIndex ? { ...s, turnsCount: newTurnsCount } : s))
       );
 
-      // 2. CHECK DECLARE / SHOW CONDITION (Master 97% Bot Win Rate or 67-78% Player Win Rate)
+      // 3. CHECK DECLARE / SHOW CONDITION
       const shouldDeclare = shouldBotDeclareWin({
         botTurnsCount: newTurnsCount,
         botHand: updatedBotHand,
@@ -686,19 +978,46 @@ export const RummyTable: React.FC = () => {
       });
 
       if (shouldDeclare) {
+        // Select finish card to discard into finish slot
+        const finishCard = chooseBotOptimalDiscard(
+          updatedBotHand,
+          wildJokerRank,
+          botSettings?.smartDiscardEnabled ?? true
+        );
+        const finalMeldedCards = updatedBotHand.filter((c) => c.id !== finishCard.id);
+        opponentHandsRef.current[bot.id] = finalMeldedCards;
+
         setTimeout(() => {
-          showTableToast(`${bot.name} declared a valid Show!`, 'info');
-          sounds.playWinFanfare();
-          recordBotGameResult(false, entryFee * 0.1);
-          if (botSettings?.forceNextWinner !== 'NONE') {
-            triggerAdminBotWinOverride('NONE');
-          }
-          handleConcludeRoundOrDeal(bot.id, false);
-        }, 600);
+          setSeats((prev) =>
+            prev.map((s, idx) =>
+              idx === botIndex ? { ...s, actionStatus: 'Declaring Show!' } : s
+            )
+          );
+
+          // Animate finish card to the Finish Slot
+          triggerCardAnimation({
+            type: 'DISCARD',
+            card: finishCard,
+            isFaceDown: false,
+            fromCoords: getSeatCoords(botSeatIndex),
+            toCoords: getFinishSlotCoords(),
+            actorName: bot.name,
+            actorSeatIndex: botSeatIndex,
+            onComplete: () => {
+              showTableToast(`${bot.name} declared a valid Show! (0 pts)`, 'info');
+              sounds.playWinFanfare();
+              recordBotGameResult(false, entryFee * 0.1);
+              if (botSettings?.forceNextWinner !== 'NONE') {
+                triggerAdminBotWinOverride('NONE');
+              }
+              handleConcludeRoundOrDeal(bot.id, false);
+            },
+          });
+        }, 900);
         return;
       }
 
-      // 3. DISCARD PHASE: Optimal Deadwood Discard
+      // 4. DISCARD PHASE: runs after draw animation finishes
       setTimeout(() => {
         const discardCard = chooseBotOptimalDiscard(
           updatedBotHand,
@@ -709,16 +1028,59 @@ export const RummyTable: React.FC = () => {
         // Update bot's in-memory hand
         opponentHandsRef.current[bot.id] = updatedBotHand.filter((c) => c.id !== discardCard.id);
 
-        sounds.playCardClick();
-        setOpenDiscardPile((prev) => [discardCard, ...prev]);
+        setSeats((prev) =>
+          prev.map((s, idx) =>
+            idx === botIndex
+              ? {
+                  ...s,
+                  actionStatus: `Discarding ${discardCard.rank}${getSuitSymbol(discardCard.suit)}...`,
+                  cardsCount: 13,
+                }
+              : s
+          )
+        );
 
-        // Occasional authentic in-game chat in Hinglish
-        const chatChance = (botSettings?.chatFrequencyPercent ?? 22) / 100;
-        if (Math.random() < chatChance) {
-          triggerBotChat(botIndex, getRandomBotChat());
-        }
+        // Smooth flight animation: real discard card flies face-up to discard pile
+        triggerCardAnimation({
+          type: 'DISCARD',
+          card: discardCard,
+          isFaceDown: false,
+          fromCoords: getSeatCoords(botSeatIndex),
+          toCoords: getDiscardPileCoords(),
+          actorName: bot.name,
+          actorSeatIndex: botSeatIndex,
+          onComplete: () => {
+            sounds.playCardClick();
+            setOpenDiscardPile((prev) => [discardCard, ...prev]);
+            setDiscardLandedHighlight(true);
+            setTimeout(() => setDiscardLandedHighlight(false), 500);
 
-        advanceTurn();
+            setSeats((prev) =>
+              prev.map((s, idx) =>
+                idx === botIndex
+                  ? {
+                      ...s,
+                      actionStatus: `Discarded ${discardCard.rank}${getSuitSymbol(discardCard.suit)}`,
+                    }
+                  : s
+              )
+            );
+
+            setTimeout(() => {
+              setSeats((prev) =>
+                prev.map((s, idx) => (idx === botIndex ? { ...s, actionStatus: null } : s))
+              );
+            }, 600);
+
+            // Occasional authentic in-game chat in Hinglish
+            const chatChance = (botSettings?.chatFrequencyPercent ?? 22) / 100;
+            if (Math.random() < chatChance) {
+              triggerBotChat(botIndex, getRandomBotChat());
+            }
+
+            advanceTurn();
+          },
+        });
       }, 1100);
     }, thinkDelayTime);
 
@@ -736,10 +1098,244 @@ export const RummyTable: React.FC = () => {
     botSettings,
   ]);
 
+  // Real-Time Multiplayer Move & Session Synchronization (All connected players see same draw/discard actions in real time)
+  useEffect(() => {
+    if (!isMultiplayer || !multiplayerSession?.id) return;
+
+    const unsubscribe = multiplayerService.subscribeToSession(multiplayerSession.id, {
+      onMove: (move: any) => {
+        const moveUserId = move.user_id || move.userId;
+        // Ignore own move (already animated and updated locally)
+        if (moveUserId === currentUser?.id) return;
+
+        const moveSeat = Number(move.seat_index ?? move.seatIndex ?? 1);
+        const moveType = move.move_type || move.moveType;
+        const moveCard: PlayingCard | undefined = move.card_data || move.card;
+
+        // Correctly locate opponent seat in seats array
+        let seatIdxInArray = seats.findIndex((s) => s.id === moveUserId);
+        if (seatIdxInArray === -1) {
+          // If not matched by ID, map seatIndex (for 2P table, opponent is index 0)
+          seatIdxInArray = Math.max(0, Math.min(seats.length - 1, moveSeat > 0 ? moveSeat - 1 : 0));
+        }
+        const oppSeatIdx = seatIdxInArray + 1;
+        const opponentName = seats[seatIdxInArray]?.name || `Opponent`;
+
+        if (moveType === 'DRAW_CLOSED') {
+          sounds.playCardDeal();
+          setClosedDeck((prev) => (prev.length > 0 ? prev.slice(1) : prev));
+          setSeats((prev) =>
+            prev.map((s, idx) =>
+              idx === seatIdxInArray
+                ? { ...s, actionStatus: 'Drawing card...', cardsCount: s.cardsCount + 1 }
+                : s
+            )
+          );
+          triggerCardAnimation({
+            type: 'DRAW_CLOSED',
+            isFaceDown: true,
+            fromCoords: getClosedDeckCoords(),
+            toCoords: getSeatCoords(oppSeatIdx),
+            actorName: opponentName,
+            actorSeatIndex: oppSeatIdx,
+            onComplete: () => {
+              setSeats((prev) =>
+                prev.map((s, idx) => (idx === seatIdxInArray ? { ...s, actionStatus: null } : s))
+              );
+            },
+          });
+        } else if (moveType === 'DRAW_OPEN') {
+          sounds.playCardDeal();
+          const cardToDraw = moveCard || openDiscardPile[0];
+          setOpenDiscardPile((prev) => prev.slice(1));
+          setSeats((prev) =>
+            prev.map((s, idx) =>
+              idx === seatIdxInArray
+                ? {
+                    ...s,
+                    actionStatus: 'Drawing from Discard Pile...',
+                    cardsCount: s.cardsCount + 1,
+                  }
+                : s
+            )
+          );
+          triggerCardAnimation({
+            type: 'DRAW_OPEN',
+            card: cardToDraw,
+            isFaceDown: false,
+            fromCoords: getDiscardPileCoords(),
+            toCoords: getSeatCoords(oppSeatIdx),
+            actorName: opponentName,
+            actorSeatIndex: oppSeatIdx,
+            onComplete: () => {
+              if (cardToDraw) {
+                setSeats((prev) =>
+                  prev.map((s, idx) =>
+                    idx === seatIdxInArray
+                      ? {
+                          ...s,
+                          actionStatus: `Picked ${cardToDraw.rank}${getSuitSymbol(cardToDraw.suit)}`,
+                        }
+                      : s
+                  )
+                );
+              }
+            },
+          });
+        } else if (moveType === 'DISCARD') {
+          if (moveCard) {
+            setSeats((prev) =>
+              prev.map((s, idx) =>
+                idx === seatIdxInArray
+                  ? {
+                      ...s,
+                      actionStatus: `Discarding ${moveCard.rank}${getSuitSymbol(moveCard.suit)}...`,
+                      cardsCount: 13,
+                    }
+                  : s
+              )
+            );
+            triggerCardAnimation({
+              type: 'DISCARD',
+              card: moveCard,
+              isFaceDown: false,
+              fromCoords: getSeatCoords(oppSeatIdx),
+              toCoords: getDiscardPileCoords(),
+              actorName: opponentName,
+              actorSeatIndex: oppSeatIdx,
+              onComplete: () => {
+                sounds.playCardClick();
+                setOpenDiscardPile((prev) => [moveCard, ...prev]);
+                setDiscardLandedHighlight(true);
+                setTimeout(() => setDiscardLandedHighlight(false), 500);
+
+                setSeats((prev) =>
+                  prev.map((s, idx) =>
+                    idx === seatIdxInArray
+                      ? {
+                          ...s,
+                          actionStatus: `Discarded ${moveCard.rank}${getSuitSymbol(moveCard.suit)}`,
+                        }
+                      : s
+                  )
+                );
+                setTimeout(() => {
+                  setSeats((prev) =>
+                    prev.map((s, idx) =>
+                      idx === seatIdxInArray ? { ...s, actionStatus: null } : s
+                    )
+                  );
+                }, 600);
+
+                if (move.nextTurnSeat !== undefined) {
+                  setCurrentTurnSeat(move.nextTurnSeat);
+                } else {
+                  advanceTurn();
+                }
+              },
+            });
+          }
+        }
+      },
+      onSessionChange: (updatedSession: any) => {
+        if (updatedSession.current_turn_seat !== undefined) {
+          setCurrentTurnSeat(updatedSession.current_turn_seat);
+        }
+        if (updatedSession.discard_pile) {
+          setOpenDiscardPile(updatedSession.discard_pile);
+        }
+      },
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [isMultiplayer, multiplayerSession?.id, currentUser?.id, openDiscardPile]);
+
+  // Synchronize Room Players in Multiplayer so human opponents are accurately shown
+  useEffect(() => {
+    if (!isMultiplayer || !multiplayerRoom?.id) return;
+
+    multiplayerService.getRoomPlayers(multiplayerRoom.id).then((players) => {
+      const otherPlayers = players.filter((p) => p.user_id !== currentUser?.id);
+      if (otherPlayers.length > 0) {
+        setSeats((prev) =>
+          otherPlayers.map((p, idx) => {
+            const existing = prev[idx];
+            return {
+              id: p.user_id,
+              name: p.username,
+              avatar: p.avatar,
+              chips: existing?.chips || 50000,
+              roundScore: existing?.roundScore || 0,
+              cumulativeScore: existing?.cumulativeScore || 0,
+              dealScores: existing?.dealScores || [],
+              status: existing?.status || 'PLAYING',
+              cardsCount: existing?.cardsCount || 13,
+              turnsCount: existing?.turnsCount || 0,
+              isDealer: p.is_dealer,
+              activeChat: existing?.activeChat || null,
+              actionStatus: existing?.actionStatus || null,
+            };
+          })
+        );
+      }
+    });
+
+    const unsubRoom = multiplayerService.subscribeToRoom(multiplayerRoom.id, {
+      onPlayersChange: (players) => {
+        const otherPlayers = players.filter((p) => p.user_id !== currentUser?.id);
+        const newIds = otherPlayers.map((p) => p.user_id);
+        const prevIds = prevPlayerIdsRef.current;
+
+        // Detect joining and leaving players
+        if (prevIds.length > 0) {
+          const joinedPlayers = otherPlayers.filter((p) => !prevIds.includes(p.user_id));
+          const leftPlayers = prevIds.filter((id) => !newIds.includes(id));
+
+          if (joinedPlayers.length > 0) {
+            sounds.playCoinSound();
+            showTableToast(`${joinedPlayers[0].username} joined the table`, 'info');
+          } else if (leftPlayers.length > 0) {
+            sounds.playCardClick();
+            showTableToast(`A player left the table`, 'warn');
+          }
+        }
+        prevPlayerIdsRef.current = newIds;
+
+        setSeats((prev) =>
+          otherPlayers.map((p, idx) => {
+            const existing = prev.find((s) => s.id === p.user_id) || prev[idx];
+            return {
+              id: p.user_id,
+              name: p.username,
+              avatar: p.avatar,
+              chips: existing?.chips || 50000,
+              roundScore: existing?.roundScore || 0,
+              cumulativeScore: existing?.cumulativeScore || 0,
+              dealScores: existing?.dealScores || [],
+              status: existing?.status || 'PLAYING',
+              cardsCount: existing?.cardsCount || 13,
+              turnsCount: existing?.turnsCount || 0,
+              isDealer: p.is_dealer,
+              activeChat: existing?.activeChat || null,
+              actionStatus: existing?.actionStatus || null,
+            };
+          })
+        );
+      },
+    });
+
+    return () => {
+      unsubRoom();
+    };
+  }, [isMultiplayer, multiplayerRoom?.id, currentUser?.id]);
+
   const advanceTurn = () => {
     setHasDrawnCard(false);
     setSelectedCards([]);
     setTurnTimer(30);
+    setSeats((prev) => prev.map((s) => ({ ...s, actionStatus: null })));
 
     const totalSeats = seats.length + 1; // 0 is User, 1..seats.length are bots
     let nextSeat = (currentTurnSeat + 1) % totalSeats;
@@ -800,14 +1396,28 @@ export const RummyTable: React.FC = () => {
     const [card, ...rest] = closedDeck;
     setClosedDeck(rest);
 
-    // Add drawn card to first group
-    setCardGroups((prev) => {
-      const copy = [...prev];
-      if (copy.length === 0) return [[card]];
-      copy[0] = [...copy[0], card];
-      return copy;
+    // Smooth animation from closed deck to user hand
+    triggerCardAnimation({
+      type: 'DRAW_CLOSED',
+      isFaceDown: true,
+      fromCoords: getClosedDeckCoords(),
+      toCoords: getSeatCoords(0),
+      actorName: 'You',
+      actorSeatIndex: 0,
+      onComplete: () => {
+        setCardGroups((prev) => {
+          const copy = [...prev];
+          if (copy.length === 0) return [[card]];
+          copy[0] = [...copy[0], card];
+          return copy;
+        });
+        setHasDrawnCard(true);
+      },
     });
-    setHasDrawnCard(true);
+
+    if (isMultiplayer && multiplayerSession?.id && currentUser?.id) {
+      multiplayerService.drawCard(multiplayerSession.id, currentUser.id, 'CLOSED');
+    }
   };
 
   // Draw from Open Discard Pile (User Turn)
@@ -832,13 +1442,29 @@ export const RummyTable: React.FC = () => {
     const [card, ...rest] = openDiscardPile;
     setOpenDiscardPile(rest);
 
-    setCardGroups((prev) => {
-      const copy = [...prev];
-      if (copy.length === 0) return [[card]];
-      copy[0] = [...copy[0], card];
-      return copy;
+    // Smooth animation from discard pile to user hand
+    triggerCardAnimation({
+      type: 'DRAW_OPEN',
+      card,
+      isFaceDown: false,
+      fromCoords: getDiscardPileCoords(),
+      toCoords: getSeatCoords(0),
+      actorName: 'You',
+      actorSeatIndex: 0,
+      onComplete: () => {
+        setCardGroups((prev) => {
+          const copy = [...prev];
+          if (copy.length === 0) return [[card]];
+          copy[0] = [...copy[0], card];
+          return copy;
+        });
+        setHasDrawnCard(true);
+      },
     });
-    setHasDrawnCard(true);
+
+    if (isMultiplayer && multiplayerSession?.id && currentUser?.id) {
+      multiplayerService.drawCard(multiplayerSession.id, currentUser.id, 'OPEN');
+    }
   };
 
   // Toggle selection of a card (tap to select or tap to deselect)
@@ -1046,11 +1672,32 @@ export const RummyTable: React.FC = () => {
       return copy.filter((g) => g.length > 0);
     });
 
-    // Add to top of discard pile
-    setOpenDiscardPile((prev) => [discardedCard, ...prev]);
+    // Smooth animation: Card flies from user hand to open discard pile
+    triggerCardAnimation({
+      type: 'DISCARD',
+      card: discardedCard,
+      isFaceDown: false,
+      fromCoords: getSeatCoords(0),
+      toCoords: getDiscardPileCoords(),
+      actorName: 'You',
+      actorSeatIndex: 0,
+      onComplete: () => {
+        sounds.playCardClick();
+        setOpenDiscardPile((prev) => [discardedCard, ...prev]);
+        setDiscardLandedHighlight(true);
+        setTimeout(() => setDiscardLandedHighlight(false), 500);
+        advanceTurn();
+      },
+    });
 
-    // Advance turn
-    advanceTurn();
+    if (isMultiplayer && multiplayerSession?.id && currentUser?.id) {
+      multiplayerService.discardCard(
+        multiplayerSession.id,
+        currentUser.id,
+        discardedCard,
+        seats.length + 1
+      );
+    }
   };
 
   // Group selected cards into a new meld group
@@ -1667,17 +2314,32 @@ export const RummyTable: React.FC = () => {
 
       {/* 1. Sleek In-Game Top Bar matching photo */}
       <div className="rummy-table-topbar w-full bg-[#0a0f18] px-3 sm:px-6 py-1.5 flex items-center justify-between text-xs z-30 shrink-0">
-        {/* Left: Circular Menu Button */}
-        <button
-          onClick={() => {
-            sounds.playCardClick();
-            setShowInGameMenu(true);
-          }}
-          title="Menu"
-          className="w-9 h-9 rounded-full bg-[#1e2533]/90 hover:bg-[#283244] text-white flex items-center justify-center border border-stone-600/60 shadow-lg active:scale-95 transition-all"
-        >
-          <Menu className="w-5 h-5" />
-        </button>
+        {/* Left: Circular Menu Button & How to Play Guide Button */}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              sounds.playCardClick();
+              setShowInGameMenu(true);
+            }}
+            title="Menu"
+            className="w-9 h-9 rounded-full bg-[#1e2533]/90 hover:bg-[#283244] text-white flex items-center justify-center border border-stone-600/60 shadow-lg active:scale-95 transition-all"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+
+          <button
+            onClick={() => {
+              sounds.playCardClick();
+              setShowHowToPlay(true);
+            }}
+            title="How to Play Rummy (Rules & Interactive Practice)"
+            className="h-9 px-3 rounded-full bg-gradient-to-r from-amber-600/30 to-amber-500/20 hover:from-amber-600/50 hover:to-amber-500/40 text-amber-300 hover:text-white border border-amber-500/50 shadow-md flex items-center gap-1.5 active:scale-95 transition-all text-xs font-black cursor-pointer"
+          >
+            <BookOpen className="w-4 h-4 text-amber-400" />
+            <span className="hidden sm:inline">How to Play</span>
+            <span className="sm:hidden text-[10px] font-bold">Guide</span>
+          </button>
+        </div>
 
         {/* Center: Sleek Dark Capsule with Shield, Table ID, Mode, Value, Signal */}
         <div className="flex items-center gap-2.5 sm:gap-4 text-[11px] sm:text-xs font-semibold text-stone-300 bg-[#0f1724]/90 border border-stone-700/70 rounded-full px-5 py-1.5 shadow-inner">
@@ -1722,8 +2384,107 @@ export const RummyTable: React.FC = () => {
       {/* 2. Main Large Wide Oval Rummy Felt Table Arena (Zoomed out for comfortable framing & breathing room on all tables) */}
       <div className="rummy-table-stage flex-1 w-full flex items-center justify-center p-1 sm:p-2 md:p-3 overflow-hidden relative">
         <div
+          ref={tableContainerRef}
           className="rummy-table-felt w-[98%] sm:w-[96%] md:w-[95%] max-w-[1360px] h-[95%] sm:h-[94%] my-auto felt-table felt-wood-border rounded-[48px] sm:rounded-[72px] md:rounded-[96px] lg:rounded-[120px] flex flex-col justify-between p-1.5 sm:p-2.5 md:p-3.5 overflow-hidden relative shadow-[0_25px_60px_rgba(0,0,0,0.95)] transition-all"
         >
+          {/* 60FPS CARD DRAW & DISCARD FLIGHT ANIMATION OVERLAY */}
+          {activeFlyAnimation && (
+            <div
+              className="pointer-events-none absolute z-50 will-change-transform"
+              style={{
+                left: `${activeFlyAnimation.currentX}%`,
+                top: `${activeFlyAnimation.currentY}%`,
+                transform: `translate(-50%, -50%) ${
+                  activeFlyAnimation.type === 'DISCARD'
+                    ? activeFlyAnimation.isAnimated
+                      ? 'scale-100 rotate-0'
+                      : 'scale-90 -rotate-6'
+                    : activeFlyAnimation.isAnimated
+                    ? 'scale-95 rotate-0'
+                    : 'scale-105 rotate-6'
+                }`,
+                transition: 'left 520ms cubic-bezier(0.2, 0.9, 0.4, 1.1), top 520ms cubic-bezier(0.2, 0.9, 0.4, 1.1), transform 520ms cubic-bezier(0.2, 0.9, 0.4, 1.1)',
+              }}
+            >
+              {/* Floating Action Badge Above Card */}
+              <div className="absolute -top-7 left-1/2 -translate-x-1/2 bg-black/90 text-amber-300 font-black text-[10px] sm:text-xs px-2.5 py-0.5 rounded-full border border-amber-400 shadow-2xl whitespace-nowrap flex items-center gap-1.5 pointer-events-none z-50">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
+                <span>
+                  {activeFlyAnimation.type === 'DRAW_CLOSED'
+                    ? `${activeFlyAnimation.actorName} drawing card...`
+                    : activeFlyAnimation.type === 'DRAW_OPEN'
+                    ? `${activeFlyAnimation.actorName} picked ${activeFlyAnimation.card?.rank}${getSuitSymbol(activeFlyAnimation.card?.suit || 'spades')}`
+                    : `${activeFlyAnimation.actorName} discarding ${activeFlyAnimation.card?.rank}${getSuitSymbol(activeFlyAnimation.card?.suit || 'spades')}`}
+                </span>
+              </div>
+
+              {activeFlyAnimation.isFaceDown ? (
+                /* Face-Down Card Back (Closed Deck Draw - Preserving Private Hand) */
+                <div className="w-18 sm:w-22 md:w-26 h-26 sm:h-32 md:h-38 rounded-xl shadow-[0_15px_35px_rgba(0,0,0,0.85),0_0_20px_rgba(251,191,36,0.6)] ring-2 ring-amber-300 overflow-hidden">
+                  <CardBackArt />
+                </div>
+              ) : activeFlyAnimation.card ? (
+                /* Face-Up Authentic Playing Card (Discard or Open Pile Draw) */
+                <div className="relative w-18 sm:w-22 md:w-26 h-26 sm:h-32 md:h-38 bg-white rounded-xl border-2 border-amber-400 shadow-[0_15px_35px_rgba(0,0,0,0.85),0_0_25px_rgba(250,204,21,0.6)] flex flex-col justify-between p-1.5 sm:p-2 select-none">
+                  {/* Top Rank + Suit */}
+                  <div className="flex items-center justify-between">
+                    <span
+                      className={`text-sm sm:text-base md:text-lg font-black leading-none ${getSuitColor(
+                        activeFlyAnimation.card.suit
+                      )}`}
+                    >
+                      {activeFlyAnimation.card.rank}
+                    </span>
+                    <span
+                      className={`text-xs sm:text-sm md:text-base font-black leading-none ${getSuitColor(
+                        activeFlyAnimation.card.suit
+                      )}`}
+                    >
+                      {getSuitSymbol(activeFlyAnimation.card.suit)}
+                    </span>
+                  </div>
+
+                  {/* Center Suit Art or Joker */}
+                  <div className="text-center font-black text-2xl sm:text-3xl md:text-4xl leading-none">
+                    {activeFlyAnimation.card.isJoker || activeFlyAnimation.card.rank === wildJokerRank ? (
+                      <div className="w-8 h-8 sm:w-10 sm:h-10 mx-auto">
+                        <JokerClownArt />
+                      </div>
+                    ) : (
+                      <span className={getSuitColor(activeFlyAnimation.card.suit)}>
+                        {getSuitSymbol(activeFlyAnimation.card.suit)}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Bottom Rank + Suit (Inverted) */}
+                  <div className="flex items-center justify-between rotate-180">
+                    <span
+                      className={`text-sm sm:text-base md:text-lg font-black leading-none ${getSuitColor(
+                        activeFlyAnimation.card.suit
+                      )}`}
+                    >
+                      {activeFlyAnimation.card.rank}
+                    </span>
+                    <span
+                      className={`text-xs sm:text-sm md:text-base font-black leading-none ${getSuitColor(
+                        activeFlyAnimation.card.suit
+                      )}`}
+                    >
+                      {getSuitSymbol(activeFlyAnimation.card.suit)}
+                    </span>
+                  </div>
+
+                  {/* Joker indicator badge if wild joker */}
+                  {(activeFlyAnimation.card.isJoker || activeFlyAnimation.card.rank === wildJokerRank) && (
+                    <div className="absolute -bottom-2 right-1 bg-amber-500 text-stone-950 font-black text-[8px] sm:text-[9px] px-1.5 py-0.2 rounded-full border border-white shadow-xs">
+                      JOKER
+                    </div>
+                  )}
+                </div>
+              ) : null}
+            </div>
+          )}
           {/* In-Game Sleek Toast Notification */}
           {tableToast && (
             <div className="absolute top-14 sm:top-18 left-1/2 -translate-x-1/2 z-50 animate-bounce pointer-events-none">
@@ -1876,158 +2637,295 @@ export const RummyTable: React.FC = () => {
             </div>
           )}
 
-          {/* OPPONENT SEATS RENDERING */}
+          {/* OPPONENT SEATS RENDERING WITH FRAMER MOTION ENTRY & EXIT ANIMATIONS */}
           {playersMode === 2 ? (
-            /* 2-Player Table: Single Opponent at top center matching reference screenshot */
+            /* 2-Player Table: Single Opponent at top center */
             <div className="rummy-table-opponents flex justify-center pt-0.5 sm:pt-1 z-20 shrink-0">
-              <div className="flex flex-col items-center relative">
-                {seats[0]?.activeChat && (
-                  <div className="absolute -top-7 bg-white text-slate-900 font-bold text-xs px-2.5 py-0.5 rounded-lg shadow-lg z-30 whitespace-nowrap animate-bounce">
-                    {seats[0].activeChat}
-                  </div>
-                )}
+              <AnimatePresence mode="popLayout">
+                {seats[0] && (
+                  <motion.div
+                    key={seats[0].id}
+                    initial={{ opacity: 0, scale: 0.5, y: -28 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{
+                      opacity: 0,
+                      scale: 0.45,
+                      y: -22,
+                      filter: 'blur(4px)',
+                      transition: { duration: 0.35, ease: 'easeInOut' },
+                    }}
+                    transition={{
+                      type: 'spring',
+                      damping: 18,
+                      stiffness: 260,
+                    }}
+                    ref={(el) => {
+                      opponentSeatRefs.current[1] = el;
+                    }}
+                    className="flex flex-col items-center relative"
+                  >
+                    {/* Dynamic Entry Pulse Effect */}
+                    <motion.div
+                      initial={{ scale: 0.8, opacity: 0.9 }}
+                      animate={{ scale: 1.35, opacity: 0 }}
+                      transition={{ duration: 1.2, ease: 'easeOut' }}
+                      className="pointer-events-none absolute -inset-2 rounded-full border-2 border-amber-400"
+                    />
 
-                {/* Turn Timer Badges matching screenshot (30 top, remaining bottom) */}
-                {currentTurnSeat === 1 && seats[0]?.status === 'PLAYING' && (
-                  <div className="absolute -top-2 -left-2 z-20 flex flex-col items-center">
-                    <span className="bg-emerald-900 text-white text-[9px] font-black px-1.5 py-0.2 rounded-t-full border border-emerald-400">
-                      30
-                    </span>
-                    <span className="bg-emerald-500 text-white text-[11px] font-black px-1.5 py-0.2 rounded-b-full border border-emerald-300 shadow-md">
-                      {turnTimer}
-                    </span>
-                  </div>
-                )}
-
-                {/* Glowing Avatar */}
-                <div
-                  className={`relative w-13 h-13 sm:w-16 sm:h-16 md:w-18 md:h-18 rounded-full p-0.5 border-2 transition-all ${
-                    seats[0]?.status === 'ELIMINATED'
-                      ? 'border-red-600 opacity-60 grayscale'
-                      : tossState.phase === 'DEALING' && tossState.activeDealingSeat === 1
-                      ? 'border-yellow-400 ring-4 ring-yellow-400/90 shadow-[0_0_25px_rgba(250,204,21,0.95)] scale-110'
-                      : currentTurnSeat === 1
-                      ? 'border-emerald-300 ring-4 ring-emerald-400/90 shadow-[0_0_25px_rgba(52,211,153,0.95)] scale-105'
-                      : 'border-emerald-500/80 ring-2 ring-emerald-400/40 shadow-[0_0_15px_rgba(16,185,129,0.5)]'
-                  }`}
-                >
-                  <img
-                    src={seats[0]?.avatar}
-                    alt={seats[0]?.name}
-                    className="w-full h-full rounded-full object-cover bg-stone-900"
-                    referrerPolicy="no-referrer"
-                  />
-                  {seats[0]?.status === 'ELIMINATED' && (
-                    <div className="absolute inset-0 bg-red-950/80 rounded-full flex items-center justify-center">
-                      <span className="text-[9px] font-black text-red-300 uppercase">OUT</span>
-                    </div>
-                  )}
-
-                  {seats[0]?.isDealer && (
-                    <div className="absolute -left-1 top-0 bg-amber-400 text-amber-950 font-black text-[9px] w-4 h-4 rounded-full flex items-center justify-center border border-white shadow-md z-20">
-                      D
-                    </div>
-                  )}
-                </div>
-
-                {/* Opponent Name Pill */}
-                <div className="flex items-center gap-1 mt-1">
-                  <span className="bg-black/75 text-white text-[11px] sm:text-xs font-black px-3.5 py-0.5 rounded-full border border-stone-700 shadow-md">
-                    {seats[0]?.name}
-                  </span>
-                  {(gameVariant === 'Pool' || gameVariant === 'Deals') && (
-                    <span className="bg-amber-950/90 text-amber-300 border border-amber-500/50 text-[10px] font-black px-2 py-0.5 rounded-full font-mono">
-                      {seats[0]?.cumulativeScore} pts
-                    </span>
-                  )}
-                </div>
-
-                {/* Face-down cards indicator (cards remain face-down) */}
-                <div className="flex items-center gap-1 bg-black/80 px-2.5 py-0.5 rounded-full border border-stone-700 mt-1 shadow-sm">
-                  <span className="text-amber-400 text-[10px]">🂠</span>
-                  <span className="text-[10px] font-mono font-bold text-amber-300">
-                    {tossState.phase === 'DEALING' ? (seats[0]?.cardsCount || 0) : 13} cards
-                  </span>
-                </div>
-              </div>
-            </div>
-          ) : (
-            /* 6-Player Table: 5 Opponents across top curve */
-            <div className="rummy-table-opponents grid grid-cols-5 gap-1.5 sm:gap-3 px-2 sm:px-6 pt-0.5 z-20 max-w-3xl mx-auto w-full shrink-0">
-              {seats.map((seat, idx) => {
-                const seatTurnIndex = idx + 1;
-                const isThisBotTurn = currentTurnSeat === seatTurnIndex;
-                const isReceivingCard = tossState.phase === 'DEALING' && tossState.activeDealingSeat === seatTurnIndex;
-
-                return (
-                  <div key={seat.id} className="flex flex-col items-center relative">
-                    {seat.activeChat && (
-                      <div className="absolute -top-7 bg-white text-slate-900 font-bold text-[10px] px-2 py-0.5 rounded-lg shadow-lg z-30 whitespace-nowrap animate-bounce">
-                        {seat.activeChat}
+                    {/* Turn Highlight Indicator */}
+                    {currentTurnSeat === 1 && seats[0]?.status === 'PLAYING' && (
+                      <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1 bg-gradient-to-r from-emerald-500 to-green-400 text-stone-950 font-black text-[9px] sm:text-[10px] px-2.5 py-0.5 rounded-full border border-white shadow-xl uppercase tracking-wider animate-pulse whitespace-nowrap">
+                        <span className="w-1.5 h-1.5 rounded-full bg-stone-950 animate-ping" />
+                        <span>OPPONENT'S TURN</span>
                       </div>
                     )}
 
-                    {isThisBotTurn && seat.status === 'PLAYING' && (
-                      <div className="absolute -top-2 left-0 z-20 flex flex-col items-center">
-                        <span className="bg-emerald-900 text-white text-[8px] font-black px-1 py-0.2 rounded-t-md border border-emerald-400">
+                    {seats[0]?.activeChat && (
+                      <div className="absolute -top-7 bg-white text-slate-900 font-bold text-xs px-2.5 py-0.5 rounded-lg shadow-lg z-30 whitespace-nowrap animate-bounce">
+                        {seats[0].activeChat}
+                      </div>
+                    )}
+
+                    {/* Action Status Label (Drawing card..., Discarding..., etc.) */}
+                    {seats[0]?.actionStatus && (
+                      <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 z-30 bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 text-stone-950 font-black text-[10px] sm:text-xs px-3 py-0.5 rounded-full shadow-2xl border border-white whitespace-nowrap animate-bounce flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-stone-950 animate-ping" />
+                        <span>{seats[0].actionStatus}</span>
+                      </div>
+                    )}
+
+                    {/* Turn Timer Badges */}
+                    {currentTurnSeat === 1 && seats[0]?.status === 'PLAYING' && (
+                      <div className="absolute -top-2 -left-2 z-20 flex flex-col items-center">
+                        <span className="bg-emerald-900 text-white text-[9px] font-black px-1.5 py-0.2 rounded-t-full border border-emerald-400">
                           30
                         </span>
-                        <span className="bg-emerald-500 text-white text-[10px] font-black px-1.5 py-0.2 rounded-b-md border border-emerald-300 shadow-md">
+                        <span className="bg-emerald-500 text-white text-[11px] font-black px-1.5 py-0.2 rounded-b-full border border-emerald-300 shadow-md">
                           {turnTimer}
                         </span>
                       </div>
                     )}
 
+                    {/* Glowing Avatar */}
                     <div
-                      className={`relative w-10 h-10 sm:w-12 sm:h-12 md:w-14 md:h-14 rounded-full p-0.5 border-2 transition-all ${
-                        seat.status === 'ELIMINATED'
+                      className={`relative w-13 h-13 sm:w-16 sm:h-16 md:w-18 md:h-18 rounded-full p-0.5 border-2 transition-all ${
+                        seats[0]?.status === 'ELIMINATED'
                           ? 'border-red-600 opacity-60 grayscale'
-                          : isReceivingCard
-                          ? 'border-yellow-400 ring-4 ring-yellow-400/90 shadow-[0_0_20px_rgba(250,204,21,0.95)] scale-110'
-                          : isThisBotTurn
-                          ? 'border-emerald-300 ring-4 ring-emerald-400/90 shadow-[0_0_18px_rgba(52,211,153,0.9)] scale-105'
-                          : 'border-emerald-500/60 ring-1 ring-emerald-400/30'
+                          : seats[0]?.status === 'DROPPED'
+                          ? 'border-amber-600 opacity-60 grayscale'
+                          : tossState.phase === 'DEALING' && tossState.activeDealingSeat === 1
+                          ? 'border-yellow-400 ring-4 ring-yellow-400/90 shadow-[0_0_25px_rgba(250,204,21,0.95)] scale-110'
+                          : currentTurnSeat === 1
+                          ? 'border-emerald-300 ring-4 ring-emerald-400/90 shadow-[0_0_28px_rgba(52,211,153,0.95)] scale-105'
+                          : 'border-emerald-500/80 ring-2 ring-emerald-400/40 shadow-[0_0_15px_rgba(16,185,129,0.5)]'
                       }`}
                     >
                       <img
-                        src={seat.avatar}
-                        alt={seat.name}
+                        src={seats[0]?.avatar}
+                        alt={seats[0]?.name}
                         className="w-full h-full rounded-full object-cover bg-stone-900"
                         referrerPolicy="no-referrer"
                       />
+                      <AnimatePresence>
+                        {seats[0]?.status === 'ELIMINATED' && (
+                          <motion.div
+                            initial={{ opacity: 0, scale: 0.4 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.4 }}
+                            transition={{ type: 'spring', damping: 15 }}
+                            className="absolute inset-0 bg-red-950/85 rounded-full flex items-center justify-center border border-red-500 shadow-md"
+                          >
+                            <span className="text-[9px] font-black text-red-300 uppercase tracking-widest">OUT</span>
+                          </motion.div>
+                        )}
+                        {seats[0]?.status === 'DROPPED' && (
+                          <motion.div
+                            initial={{ opacity: 0, scale: 0.4 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.4 }}
+                            transition={{ type: 'spring', damping: 15 }}
+                            className="absolute inset-0 bg-amber-950/90 rounded-full flex items-center justify-center border border-amber-500/80 shadow-md"
+                          >
+                            <span className="text-[8px] font-black text-amber-300 uppercase tracking-wider">DROP</span>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
 
-                      {seat.status === 'ELIMINATED' && (
-                        <div className="absolute inset-0 bg-red-950/80 rounded-full flex items-center justify-center">
-                          <span className="text-[7px] font-black text-red-300 uppercase">OUT</span>
-                        </div>
-                      )}
-
-                      {seat.isDealer && (
-                        <div className="absolute -left-1 top-0 bg-amber-400 text-amber-950 font-black text-[8px] w-3.5 h-3.5 rounded-full flex items-center justify-center border border-white shadow-md z-20">
+                      {seats[0]?.isDealer && (
+                        <div className="absolute -left-1 top-0 bg-amber-400 text-amber-950 font-black text-[9px] w-4 h-4 rounded-full flex items-center justify-center border border-white shadow-md z-20">
                           D
                         </div>
                       )}
                     </div>
 
-                    <span className="text-[10px] sm:text-[11px] font-bold text-white mt-0.5 drop-shadow-md truncate max-w-[70px] text-center">
-                      {seat.name}
-                    </span>
-                    {(gameVariant === 'Pool' || gameVariant === 'Deals') && (
-                      <span className="text-[9px] font-black text-amber-300 font-mono">
-                        {seat.cumulativeScore} pts
+                    {/* Opponent Name Pill */}
+                    <div className="flex items-center gap-1 mt-1">
+                      <span className="bg-black/75 text-white text-[11px] sm:text-xs font-black px-3.5 py-0.5 rounded-full border border-stone-700 shadow-md">
+                        {seats[0]?.name}
                       </span>
-                    )}
+                      {(gameVariant === 'Pool' || gameVariant === 'Deals') && (
+                        <span className="bg-amber-950/90 text-amber-300 border border-amber-500/50 text-[10px] font-black px-2 py-0.5 rounded-full font-mono">
+                          {seats[0]?.cumulativeScore} pts
+                        </span>
+                      )}
+                    </div>
 
-                    {/* Face-down cards indicator */}
-                    <div className="flex items-center gap-0.5 bg-black/80 px-1.5 py-0.2 rounded-full border border-stone-700/80 mt-0.5 shadow-sm">
-                      <span className="text-[8px] text-amber-400">🂠</span>
-                      <span className="text-[8px] font-mono font-bold text-amber-300">
-                        {tossState.phase === 'DEALING' ? (seat.cardsCount || 0) : 13}
+                    {/* Face-down cards indicator (cards remain face-down) */}
+                    <div className="flex items-center gap-1 bg-black/80 px-2.5 py-0.5 rounded-full border border-stone-700 mt-1 shadow-sm">
+                      <span className="text-amber-400 text-[10px]">🂠</span>
+                      <span className="text-[10px] font-mono font-bold text-amber-300">
+                        {tossState.phase === 'DEALING' ? (seats[0]?.cardsCount || 0) : 13} cards
                       </span>
                     </div>
-                  </div>
-                );
-              })}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          ) : (
+            /* 6-Player Table: 5 Opponents across top curve */
+            <div className="rummy-table-opponents grid grid-cols-5 gap-1.5 sm:gap-3 px-2 sm:px-6 pt-0.5 z-20 max-w-3xl mx-auto w-full shrink-0">
+              <AnimatePresence mode="popLayout">
+                {seats.map((seat, idx) => {
+                  const seatTurnIndex = idx + 1;
+                  const isThisBotTurn = currentTurnSeat === seatTurnIndex;
+                  const isReceivingCard = tossState.phase === 'DEALING' && tossState.activeDealingSeat === seatTurnIndex;
+
+                  return (
+                    <motion.div
+                      key={seat.id}
+                      initial={{ opacity: 0, scale: 0.5, y: -22 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      exit={{
+                        opacity: 0,
+                        scale: 0.45,
+                        y: -18,
+                        filter: 'blur(4px)',
+                        transition: { duration: 0.3, ease: 'easeInOut' },
+                      }}
+                      transition={{
+                        type: 'spring',
+                        damping: 18,
+                        stiffness: 260,
+                        delay: idx * 0.04,
+                      }}
+                      ref={(el) => {
+                        opponentSeatRefs.current[idx + 1] = el;
+                      }}
+                      className="flex flex-col items-center relative"
+                    >
+                      {/* Dynamic Entry Pulse Effect */}
+                      <motion.div
+                        initial={{ scale: 0.8, opacity: 0.9 }}
+                        animate={{ scale: 1.35, opacity: 0 }}
+                        transition={{ duration: 1.2, ease: 'easeOut' }}
+                        className="pointer-events-none absolute -inset-2 rounded-full border-2 border-amber-400"
+                      />
+
+                      {/* Turn Highlight Indicator */}
+                      {isThisBotTurn && seat.status === 'PLAYING' && (
+                        <div className="absolute -top-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1 bg-gradient-to-r from-emerald-500 to-green-400 text-stone-950 font-black text-[8px] sm:text-[9px] px-2 py-0.2 rounded-full border border-white shadow-md uppercase tracking-wider animate-pulse whitespace-nowrap">
+                          <span className="w-1 h-1 rounded-full bg-stone-950 animate-ping" />
+                          <span>TURN</span>
+                        </div>
+                      )}
+
+                      {seat.activeChat && (
+                        <div className="absolute -top-7 bg-white text-slate-900 font-bold text-[10px] px-2 py-0.5 rounded-lg shadow-lg z-30 whitespace-nowrap animate-bounce">
+                          {seat.activeChat}
+                        </div>
+                      )}
+
+                      {/* Action Status Label (Drawing card..., Discarding..., etc.) */}
+                      {seat.actionStatus && (
+                        <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 z-30 bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 text-stone-950 font-black text-[9px] sm:text-[10px] px-2 py-0.5 rounded-full shadow-2xl border border-white whitespace-nowrap animate-bounce flex items-center gap-1">
+                          <span className="w-1 h-1 rounded-full bg-stone-950 animate-ping" />
+                          <span>{seat.actionStatus}</span>
+                        </div>
+                      )}
+
+                      {isThisBotTurn && seat.status === 'PLAYING' && (
+                        <div className="absolute -top-2 left-0 z-20 flex flex-col items-center">
+                          <span className="bg-emerald-900 text-white text-[8px] font-black px-1 py-0.2 rounded-t-md border border-emerald-400">
+                            30
+                          </span>
+                          <span className="bg-emerald-500 text-white text-[10px] font-black px-1.5 py-0.2 rounded-b-md border border-emerald-300 shadow-md">
+                            {turnTimer}
+                          </span>
+                        </div>
+                      )}
+
+                      <div
+                        className={`relative w-10 h-10 sm:w-12 sm:h-12 md:w-14 md:h-14 rounded-full p-0.5 border-2 transition-all ${
+                          seat.status === 'ELIMINATED'
+                            ? 'border-red-600 opacity-60 grayscale'
+                            : seat.status === 'DROPPED'
+                            ? 'border-amber-600 opacity-60 grayscale'
+                            : isReceivingCard
+                            ? 'border-yellow-400 ring-4 ring-yellow-400/90 shadow-[0_0_20px_rgba(250,204,21,0.95)] scale-110'
+                            : isThisBotTurn
+                            ? 'border-emerald-300 ring-4 ring-emerald-400/90 shadow-[0_0_22px_rgba(52,211,153,0.95)] scale-105'
+                            : 'border-emerald-500/60 ring-1 ring-emerald-400/30'
+                        }`}
+                      >
+                        <img
+                          src={seat.avatar}
+                          alt={seat.name}
+                          className="w-full h-full rounded-full object-cover bg-stone-900"
+                          referrerPolicy="no-referrer"
+                        />
+
+                        <AnimatePresence>
+                          {seat.status === 'ELIMINATED' && (
+                            <motion.div
+                              initial={{ opacity: 0, scale: 0.4 }}
+                              animate={{ opacity: 1, scale: 1 }}
+                              exit={{ opacity: 0, scale: 0.4 }}
+                              transition={{ type: 'spring', damping: 15 }}
+                              className="absolute inset-0 bg-red-950/85 rounded-full flex items-center justify-center border border-red-500 shadow-md"
+                            >
+                              <span className="text-[7px] font-black text-red-300 uppercase">OUT</span>
+                            </motion.div>
+                          )}
+                          {seat.status === 'DROPPED' && (
+                            <motion.div
+                              initial={{ opacity: 0, scale: 0.4 }}
+                              animate={{ opacity: 1, scale: 1 }}
+                              exit={{ opacity: 0, scale: 0.4 }}
+                              transition={{ type: 'spring', damping: 15 }}
+                              className="absolute inset-0 bg-amber-950/90 rounded-full flex items-center justify-center border border-amber-500/80 shadow-md"
+                            >
+                              <span className="text-[7px] font-black text-amber-300 uppercase tracking-widest">DROP</span>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+
+                        {seat.isDealer && (
+                          <div className="absolute -left-1 top-0 bg-amber-400 text-amber-950 font-black text-[8px] w-3.5 h-3.5 rounded-full flex items-center justify-center border border-white shadow-md z-20">
+                            D
+                          </div>
+                        )}
+                      </div>
+
+                      <span className="text-[10px] sm:text-[11px] font-bold text-white mt-0.5 drop-shadow-md truncate max-w-[70px] text-center">
+                        {seat.name}
+                      </span>
+                      {(gameVariant === 'Pool' || gameVariant === 'Deals') && (
+                        <span className="text-[9px] font-black text-amber-300 font-mono">
+                          {seat.cumulativeScore} pts
+                        </span>
+                      )}
+
+                      {/* Face-down cards indicator */}
+                      <div className="flex items-center gap-0.5 bg-black/80 px-1.5 py-0.2 rounded-full border border-stone-700/80 mt-0.5 shadow-sm">
+                        <span className="text-[8px] text-amber-400">🂠</span>
+                        <span className="text-[8px] font-mono font-bold text-amber-300">
+                          {tossState.phase === 'DEALING' ? (seat.cardsCount || 0) : 13}
+                        </span>
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </AnimatePresence>
             </div>
           )}
 
@@ -2053,6 +2951,7 @@ export const RummyTable: React.FC = () => {
 
               {/* Closed Deck Stack with Ornate Back */}
               <div
+                ref={closedDeckRef}
                 onClick={handleDrawClosed}
                 title="Tap to draw from Closed Deck"
                 className={`rummy-pile-card relative w-20 sm:w-24 md:w-28 lg:w-30 h-28 sm:h-34 md:h-40 lg:h-44 cursor-pointer hover:scale-105 active:scale-95 transition-all z-20 ${
@@ -2070,6 +2969,7 @@ export const RummyTable: React.FC = () => {
 
             {/* Middle: FINISH / SHOW SLOT (Declare) */}
             <div
+              ref={finishSlotRef}
               onClick={() => {
                 if (currentTurnSeat === 0 && selectedCards.length === 1) {
                   handleDeclareShow();
@@ -2094,13 +2994,15 @@ export const RummyTable: React.FC = () => {
             </div>
 
             {/* Right: Open Discard Pile */}
-            <div className="relative flex items-center">
+            <div className="relative flex items-center" ref={discardPileRef}>
               {openDiscardPile.length > 0 ? (
                 <div
                   onClick={handleDrawOpen}
                   title="Draw from Open Discard Pile"
                   className={`rummy-pile-card w-20 sm:w-24 md:w-28 lg:w-30 h-28 sm:h-34 md:h-40 lg:h-44 bg-white rounded-xl border-2 border-slate-300 shadow-2xl flex flex-col justify-between p-1.5 sm:p-2 cursor-pointer hover:scale-105 active:scale-95 transition-all z-10 select-none ${
-                    currentTurnSeat === 0 && !hasDrawnCard && !playerDropped && !playerEliminated
+                    discardLandedHighlight
+                      ? 'ring-4 ring-amber-400 shadow-[0_0_35px_rgba(251,191,36,1)] scale-105'
+                      : currentTurnSeat === 0 && !hasDrawnCard && !playerDropped && !playerEliminated
                       ? 'ring-4 ring-emerald-400 shadow-[0_0_25px_rgba(52,211,153,0.9)] animate-pulse'
                       : ''
                   }`}
@@ -2154,8 +3056,23 @@ export const RummyTable: React.FC = () => {
             </div>
           </div>
 
+          {/* User Turn Guidance Banner */}
+          {currentTurnSeat === 0 && !playerDropped && !playerEliminated && (
+            <div className="flex justify-center -my-1 z-30 pointer-events-none">
+              <div className="bg-black/90 backdrop-blur-xs text-amber-300 font-extrabold text-[11px] sm:text-xs px-4 py-1 rounded-full border border-amber-400/80 shadow-2xl flex items-center gap-2 animate-pulse">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                <span>
+                  {hasDrawnCard
+                    ? 'Select 1 card to Discard to Open Pile or Finish to Declare'
+                    : 'Your Turn: Draw from Closed Deck or Open Discard Pile'}
+                </span>
+              </div>
+            </div>
+          )}
+
           {/* 4. PLAYER HAND: 13 Large Cards in Meld Groups with Drag-and-Drop & Tap-to-Move */}
           <div
+            ref={playerHandRef}
             className="rummy-table-hand w-full flex justify-center z-20 px-1 sm:px-2 pb-1 shrink-0"
             onTouchMove={handleCardTouchMove}
             onTouchEnd={handleCardTouchEnd}
@@ -2420,7 +3337,12 @@ export const RummyTable: React.FC = () => {
               </div>
 
               {/* User Avatar with Dealer Badge and Turn Timer */}
-              <div className="relative">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.85, y: 18 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                transition={{ type: 'spring', damping: 18, stiffness: 250 }}
+                className="relative"
+              >
                 {isUserDealer && (
                   <div className="absolute -left-1.5 top-0 bg-amber-400 text-amber-950 font-black text-[9px] w-4 h-4 rounded-full flex items-center justify-center border border-white shadow-md z-20">
                     D
@@ -2451,19 +3373,33 @@ export const RummyTable: React.FC = () => {
                     </div>
                   )}
 
-                  {playerEliminated && (
-                    <div className="absolute inset-0 bg-red-950/80 rounded-full flex items-center justify-center">
-                      <span className="text-[8px] font-black text-red-300 uppercase">OUT</span>
-                    </div>
-                  )}
+                  <AnimatePresence>
+                    {playerEliminated && (
+                      <motion.div
+                        initial={{ opacity: 0, scale: 0.5 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.5 }}
+                        className="absolute inset-0 bg-red-950/80 rounded-full flex items-center justify-center border border-red-500 shadow-md"
+                      >
+                        <span className="text-[8px] font-black text-red-300 uppercase">OUT</span>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
+
+                {currentTurnSeat === 0 && !playerDropped && !playerEliminated && (
+                  <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 bg-gradient-to-r from-emerald-500 to-green-400 text-stone-950 font-black text-[8px] sm:text-[9px] px-2 py-0.5 rounded-full border border-white shadow-lg uppercase tracking-wider animate-pulse whitespace-nowrap">
+                    <span className="w-1.5 h-1.5 rounded-full bg-stone-950 animate-ping" />
+                    <span>YOUR TURN</span>
+                  </div>
+                )}
 
                 {playerChatBubble && (
                   <div className="absolute -top-7 left-1/2 -translate-x-1/2 bg-white text-slate-900 font-bold text-[10px] px-2 py-0.5 rounded-lg shadow-lg z-30 whitespace-nowrap animate-bounce">
                     {playerChatBubble}
                   </div>
                 )}
-              </div>
+              </motion.div>
 
               {/* Hand Score & Cumulative Display */}
               <div className="flex flex-col text-xs sm:text-sm font-black text-white">
@@ -3099,6 +4035,23 @@ export const RummyTable: React.FC = () => {
                 <button
                   onClick={() => {
                     sounds.playCardClick();
+                    setShowInGameMenu(false);
+                    setShowHowToPlay(true);
+                  }}
+                  className="w-full py-3 px-4 bg-[#8b0f19] hover:bg-[#a11522] text-white font-extrabold text-xs rounded-lg flex items-center justify-between shadow-xs border border-red-500/20 active:scale-95 transition-transform"
+                >
+                  <div className="flex items-center gap-3">
+                    <BookOpen className="w-4 h-4 text-amber-300" />
+                    <span>HOW TO PLAY</span>
+                  </div>
+                  <span className="text-[10px] font-black text-amber-300 bg-amber-950/60 border border-amber-500/40 px-2 py-0.5 rounded-full">
+                    GUIDE
+                  </span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    sounds.playCardClick();
                     setSoundEnabled(!soundEnabled);
                   }}
                   className="w-full py-3 px-4 bg-[#8b0f19] hover:bg-[#a11522] text-white font-extrabold text-xs rounded-lg flex items-center justify-between shadow-xs border border-red-500/20"
@@ -3182,6 +4135,13 @@ export const RummyTable: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* 9. Interactive How to Play Walkthrough & Practice Lab Modal */}
+      <HowToPlayModal
+        isOpen={showHowToPlay}
+        onClose={() => setShowHowToPlay(false)}
+        wildJokerRank={wildJokerRank}
+      />
     </div>
   );
 };

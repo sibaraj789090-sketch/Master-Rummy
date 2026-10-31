@@ -23,6 +23,7 @@ import {
   KeyRound,
   Trophy,
   Download,
+  BookOpen,
 } from 'lucide-react';
 import { sounds } from '../../utils/sound';
 import { verifyAdminCredentials } from '../../lib/supabase';
@@ -396,12 +397,13 @@ export const DrawerMenu: React.FC<DrawerMenuProps> = ({
                 <button
                   onClick={() => {
                     sounds.playCardClick();
-                    alert('How to play Indian Rummy: Make 2 sequences (1 pure, 1 impure/pure) + sets. Aces can be high or low.');
+                    onClose();
+                    onOpenSupport();
                   }}
                   className="w-full py-1.5 flex items-center justify-between hover:text-white"
                 >
                   <div className="flex items-center gap-2">
-                    <HelpCircle className="w-4 h-4 text-cyan-400" />
+                    <BookOpen className="w-4 h-4 text-cyan-400" />
                     <span>Rummy Rules & Tutorial</span>
                   </div>
                   <ChevronRight className="w-4 h-4 text-stone-500" />
