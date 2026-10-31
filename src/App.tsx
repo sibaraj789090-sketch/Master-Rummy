@@ -20,6 +20,7 @@ import { DocumentsVerificationModal } from './components/mobile/DocumentsVerific
 import { RummyTable } from './components/game/RummyTable';
 import { AdminPanel } from './components/admin/AdminPanel';
 import { sounds } from './utils/sound';
+import { ErrorBoundary } from './components/common/ErrorBoundary';
 
 const isCurrentPathAdmin = (): boolean => {
   if (typeof window === 'undefined') return false;
@@ -113,7 +114,11 @@ const MainApp: React.FC = () => {
 
   // If game is active
   if (activeScreen === 'GAME_TABLE' && activeGameConfig) {
-    return <RummyTable />;
+    return (
+      <ErrorBoundary onReset={() => setActiveScreen('LOBBY')}>
+        <RummyTable />
+      </ErrorBoundary>
+    );
   }
 
   return (
@@ -249,8 +254,10 @@ const MainApp: React.FC = () => {
 
 export default function App() {
   return (
-    <RummyProvider>
-      <MainApp />
-    </RummyProvider>
+    <ErrorBoundary>
+      <RummyProvider>
+        <MainApp />
+      </RummyProvider>
+    </ErrorBoundary>
   );
 }

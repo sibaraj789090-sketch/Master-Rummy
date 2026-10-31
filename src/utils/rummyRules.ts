@@ -694,14 +694,25 @@ export interface HandValidation {
 }
 
 export function validateRummyHand(groups: PlayingCard[][], wildJokerRank: Rank): HandValidation {
-  const allCards = groups.flat();
+  if (!groups || !Array.isArray(groups)) {
+    return {
+      isValidDeclaration: false,
+      hasPureSequence: false,
+      sequencesCount: 0,
+      pureSequencesCount: 0,
+      totalPoints: 80,
+      statusMessage: 'Invalid hand data',
+    };
+  }
+
+  const allCards = groups.flat().filter(Boolean);
   if (allCards.length !== 13) {
     return {
       isValidDeclaration: false,
       hasPureSequence: false,
       sequencesCount: 0,
       pureSequencesCount: 0,
-      totalPoints: allCards.reduce((acc, c) => acc + c.points, 0),
+      totalPoints: allCards.reduce((acc, c) => acc + (c?.points || 0), 0),
       statusMessage: `Hand must have exactly 13 cards (currently ${allCards.length})`,
     };
   }
@@ -713,6 +724,7 @@ export function validateRummyHand(groups: PlayingCard[][], wildJokerRank: Rank):
   let unmeldedCards: PlayingCard[] = [];
 
   for (const group of groups) {
+    if (!Array.isArray(group) || group.length === 0) continue;
     if (isPureSequence(group)) {
       pureSeqCount++;
     } else if (isImpureSequence(group, wildJokerRank)) {
@@ -721,7 +733,7 @@ export function validateRummyHand(groups: PlayingCard[][], wildJokerRank: Rank):
       validSetsCount++;
     } else {
       invalidGroupsCount++;
-      unmeldedCards.push(...group);
+      unmeldedCards.push(...group.filter(Boolean));
     }
   }
 
@@ -729,18 +741,21 @@ export function validateRummyHand(groups: PlayingCard[][], wildJokerRank: Rank):
   const hasPure = pureSeqCount >= 1;
   const hasMinSequences = totalSequences >= 2;
 
+  const isCardWild = (c: PlayingCard) => Boolean(c && (c.rank === wildJokerRank || c.isJoker || c.value === 0));
+
   let totalPoints = 0;
   if (!hasPure) {
     // If no pure sequence, full hand penalty (max 80 pts in Indian Rummy)
-    totalPoints = Math.min(80, allCards.reduce((acc, c) => (c.rank === wildJokerRank || c.isJoker ? acc : acc + c.points), 0));
+    totalPoints = Math.min(80, allCards.reduce((acc, c) => (isCardWild(c) ? acc : acc + (c?.points || 0)), 0));
   } else if (!hasMinSequences) {
     // Has 1 pure sequence, penalty on all other cards
-    const pureCards = groups.find(g => isPureSequence(g)) || [];
-    const nonPureCards = allCards.filter(c => !pureCards.includes(c));
-    totalPoints = Math.min(80, nonPureCards.reduce((acc, c) => (c.rank === wildJokerRank || c.isJoker ? acc : acc + c.points), 0));
+    const pureCards = groups.find(g => Array.isArray(g) && isPureSequence(g)) || [];
+    const pureCardIds = new Set(pureCards.map(c => c?.id).filter(Boolean));
+    const nonPureCards = allCards.filter(c => !pureCardIds.has(c?.id));
+    totalPoints = Math.min(80, nonPureCards.reduce((acc, c) => (isCardWild(c) ? acc : acc + (c?.points || 0)), 0));
   } else {
     // Points only on invalid groups
-    totalPoints = Math.min(80, unmeldedCards.reduce((acc, c) => (c.rank === wildJokerRank || c.isJoker ? acc : acc + c.points), 0));
+    totalPoints = Math.min(80, unmeldedCards.reduce((acc, c) => (isCardWild(c) ? acc : acc + (c?.points || 0)), 0));
   }
 
   const isValid = hasPure && hasMinSequences && invalidGroupsCount === 0;

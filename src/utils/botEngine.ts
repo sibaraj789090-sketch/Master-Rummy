@@ -220,25 +220,37 @@ export function queryBotPool(params: {
 
 /**
  * Selects distinct realistic opponents for a table based on player count and table stakes.
+ * Includes defensive iteration bounds to guarantee zero loop freezing.
  */
 export function selectOpponentsForTable(
   count: number,
   tableVariant: string,
   entryFee: number
 ): BotProfile[] {
+  const safeCount = Math.max(1, Math.min(count, 5));
   const chosen: BotProfile[] = [];
   const usedIndices = new Set<number>();
   const now = Date.now();
+  let attempts = 0;
 
-  while (chosen.length < count) {
-    const randIndex = Math.floor((Math.sin(now + chosen.length * 7919) * 0.5 + 0.5) * 100000);
+  while (chosen.length < safeCount && attempts < 120) {
+    attempts++;
+    const randIndex = Math.floor(Math.abs(Math.sin(now + attempts * 7919 + chosen.length * 1013)) * 100000) % 100000;
     if (!usedIndices.has(randIndex)) {
       usedIndices.add(randIndex);
       const bot = getBotByIndex(randIndex);
       // Adjust chips proportionally to table stakes so it looks authentic
-      bot.chips = Math.max(bot.chips, entryFee * (count === 1 ? 5 : 10) + Math.floor(Math.random() * 5000));
+      bot.chips = Math.max(bot.chips, entryFee * (safeCount === 1 ? 5 : 10) + Math.floor(Math.random() * 5000));
       chosen.push(bot);
     }
+  }
+
+  // Guaranteed fallback so chosen array is never empty or short
+  while (chosen.length < safeCount) {
+    const fallbackIdx = ((chosen.length + 1) * 313) % 100000;
+    const bot = getBotByIndex(fallbackIdx);
+    bot.chips = Math.max(bot.chips, entryFee * 8);
+    chosen.push(bot);
   }
 
   return chosen;
@@ -247,6 +259,7 @@ export function selectOpponentsForTable(
 /**
  * Evaluates whether a bot should strategically Drop its hand (First Drop or Middle Drop)
  * like an experienced real Indian Rummy player.
+ * Fully guarded against incomplete hands, undefined cards, and edge cases.
  */
 export function shouldBotDropHand(params: {
   botTurnsCount: number;
@@ -256,72 +269,81 @@ export function shouldBotDropHand(params: {
   gameVariant: string;
   forceWinner?: 'NONE' | 'BOT' | 'PLAYER';
 }): { shouldDrop: boolean; isMiddleDrop: boolean; reason: string } {
-  const { botTurnsCount, botHand, wildJokerRank, dropProbabilityPercent, forceWinner } = params;
+  try {
+    const { botTurnsCount = 0, botHand, wildJokerRank, dropProbabilityPercent = 8, forceWinner } = params;
 
-  // Never drop if admin forced bot to win
-  if (forceWinner === 'BOT') return { shouldDrop: false, isMiddleDrop: false, reason: '' };
-  const boost = forceWinner === 'PLAYER' ? 1.6 : 1.0;
-
-  const isJokerCard = (c: PlayingCard) => c.rank === wildJokerRank || Boolean(c.isJoker) || c.value === 0;
-  const jokersCount = botHand.filter(isJokerCard).length;
-  const naturalCards = botHand.filter((c) => !isJokerCard(c));
-
-  // Count high deadwood face cards (A, K, Q, J, 10)
-  const highPointsCount = naturalCards.filter((c) => c.points === 10).length;
-
-  // Check if hand already has a pure sequence
-  if (wildJokerRank && botHand.length >= 13) {
-    const sortedGroups = autoSortHand(botHand, wildJokerRank);
-    const hasPure = sortedGroups.some((g) => isPureSequence(g));
-    // If bot has already formed a pure sequence, pro players NEVER drop!
-    if (hasPure) return { shouldDrop: false, isMiddleDrop: false, reason: '' };
-  }
-
-  // 1. FIRST DROP EVALUATION (Turn 0 / Before drawing or on first turn)
-  if (botTurnsCount === 0) {
-    const dropRoll = Math.random() * 100;
-    // Condition A: Terrible hand with 0 jokers and >= 5 high deadwood cards
-    if (jokersCount === 0 && highPointsCount >= 5 && dropRoll < (dropProbabilityPercent * 2.2 * boost)) {
-      return {
-        shouldDrop: true,
-        isMiddleDrop: false,
-        reason: 'Poor deal with 0 Jokers and high deadwood',
-      };
+    // Never drop if admin forced bot to win
+    if (forceWinner === 'BOT') return { shouldDrop: false, isMiddleDrop: false, reason: '' };
+    if (!botHand || !Array.isArray(botHand) || botHand.length === 0) {
+      return { shouldDrop: false, isMiddleDrop: false, reason: '' };
     }
-    // Condition B: Standard strategic drop roll when having 0 jokers
-    if (jokersCount === 0 && dropRoll < (dropProbabilityPercent * boost)) {
-      return {
-        shouldDrop: true,
-        isMiddleDrop: false,
-        reason: 'Strategic First Drop (Concede 20 pts)',
-      };
-    }
-  }
 
-  // 2. MIDDLE DROP EVALUATION (Turns 1 to 3)
-  if (botTurnsCount >= 1 && botTurnsCount <= 3) {
-    const dropRoll = Math.random() * 100;
-    // If by turn 2 or 3, hand has no jokers and no sequence
-    if (jokersCount === 0 && dropRoll < (dropProbabilityPercent * 0.45 * boost)) {
-      return {
-        shouldDrop: true,
-        isMiddleDrop: true,
-        reason: 'Middle Drop to minimize penalty points',
-      };
-    }
-  }
+    const boost = forceWinner === 'PLAYER' ? 1.6 : 1.0;
 
-  return { shouldDrop: false, isMiddleDrop: false, reason: '' };
+    const isJokerCard = (c: PlayingCard) => Boolean(c && (c.rank === wildJokerRank || c.isJoker || c.value === 0));
+    const jokersCount = botHand.filter(isJokerCard).length;
+    const naturalCards = botHand.filter((c) => c && !isJokerCard(c));
+
+    // Count high deadwood face cards (A, K, Q, J, 10)
+    const highPointsCount = naturalCards.filter((c) => c && c.points === 10).length;
+
+    // Check if hand already has a pure sequence
+    if (wildJokerRank && botHand.length >= 13) {
+      try {
+        const sortedGroups = autoSortHand(botHand, wildJokerRank);
+        if (Array.isArray(sortedGroups)) {
+          const hasPure = sortedGroups.some((g) => Array.isArray(g) && isPureSequence(g));
+          // If bot has already formed a pure sequence, pro players NEVER drop!
+          if (hasPure) return { shouldDrop: false, isMiddleDrop: false, reason: '' };
+        }
+      } catch {
+        // Safe fallback
+      }
+    }
+
+    // 1. FIRST DROP EVALUATION (Turn 0 / Before drawing or on first turn)
+    if (botTurnsCount === 0) {
+      const dropRoll = Math.random() * 100;
+      // Condition A: Terrible hand with 0 jokers and >= 5 high deadwood cards
+      if (jokersCount === 0 && highPointsCount >= 5 && dropRoll < (dropProbabilityPercent * 2.2 * boost)) {
+        return {
+          shouldDrop: true,
+          isMiddleDrop: false,
+          reason: 'Poor deal with 0 Jokers and high deadwood',
+        };
+      }
+      // Condition B: Standard strategic drop roll when having 0 jokers
+      if (jokersCount === 0 && dropRoll < (dropProbabilityPercent * boost)) {
+        return {
+          shouldDrop: true,
+          isMiddleDrop: false,
+          reason: 'Strategic First Drop (Concede 20 pts)',
+        };
+      }
+    }
+
+    // 2. MIDDLE DROP EVALUATION (Turns 1 to 3)
+    if (botTurnsCount >= 1 && botTurnsCount <= 3) {
+      const dropRoll = Math.random() * 100;
+      // If by turn 2 or 3, hand has no jokers and no sequence
+      if (jokersCount === 0 && dropRoll < (dropProbabilityPercent * 0.45 * boost)) {
+        return {
+          shouldDrop: true,
+          isMiddleDrop: true,
+          reason: 'Middle Drop to minimize penalty points',
+        };
+      }
+    }
+
+    return { shouldDrop: false, isMiddleDrop: false, reason: '' };
+  } catch {
+    return { shouldDrop: false, isMiddleDrop: false, reason: '' };
+  }
 }
 
 /**
  * Determines whether a bot should take the open discard card or draw from closed deck.
- * Advanced Pro Strategy:
- * 1. Checks if open card completes a 14-card winning declaration immediately.
- * 2. Checks if open card completes or extends a Pure Sequence.
- * 3. Checks if open card completes an Impure Sequence or Set.
- * 4. Checks if open card is a Wild Joker.
- * 5. Avoids taking high isolated deadwood cards from open pile.
+ * Advanced Pro Strategy with complete crash guards.
  */
 export function shouldBotTakeDiscardCard(
   botHand: PlayingCard[],
@@ -329,131 +351,174 @@ export function shouldBotTakeDiscardCard(
   wildJokerRank: Rank | null,
   smartDrawEnabled: boolean
 ): boolean {
-  if (!openCard || !smartDrawEnabled) return false;
-
-  // 1. If open card is a Wild Joker, definitely take it!
-  if (wildJokerRank && (openCard.rank === wildJokerRank || openCard.isJoker)) {
-    return true;
-  }
-
-  // 2. Check if taking openCard would produce an immediate winning show
-  if (wildJokerRank && botHand.length >= 13) {
-    const simulated14 = [...botHand, openCard];
-    const sorted14 = autoSortHand(simulated14, wildJokerRank);
-    const validCheck = validateRummyHand(sorted14.slice(0, 4), wildJokerRank);
-    if (validCheck.isValidDeclaration || (validCheck.hasPureSequence && validCheck.sequencesCount >= 2)) {
-      return true; // Game winning pick!
+  try {
+    if (!openCard || !smartDrawEnabled || !botHand || !Array.isArray(botHand) || botHand.length === 0) {
+      return false;
     }
-  }
 
-  // 3. Check if open card completes or extends a Pure Sequence in same suit
-  const sameSuitCards = botHand.filter((c) => c.suit === openCard.suit && !c.isJoker && (wildJokerRank ? c.rank !== wildJokerRank : true));
-  if (sameSuitCards.length >= 2) {
-    const rankValues = sameSuitCards.map((c) => c.value);
-    const targetVal = openCard.value;
-    const hasAdj1 = rankValues.includes(targetVal - 1);
-    const hasAdj2 = rankValues.includes(targetVal + 1);
-    const hasSkip1 = rankValues.includes(targetVal - 2);
-    const hasSkip2 = rankValues.includes(targetVal + 2);
-
-    // Adjacent on both sides (e.g. 4 and 6, open card is 5)
-    if (hasAdj1 && hasAdj2) return true;
-    // Inside connectors
-    if (hasAdj1 && hasSkip2) return true;
-    if (hasAdj2 && hasSkip1) return true;
-    // Two consecutive in hand, open card extends either side (e.g. 5,6 in hand, open is 4 or 7)
-    if ((hasAdj1 && rankValues.includes(targetVal - 2)) || (hasAdj2 && rankValues.includes(targetVal + 2))) {
+    // 1. If open card is a Wild Joker, definitely take it!
+    if (wildJokerRank && (openCard.rank === wildJokerRank || openCard.isJoker)) {
       return true;
     }
-  }
 
-  // 4. Check if open card completes a Set (same rank, different suits)
-  const sameRankCards = botHand.filter(
-    (c) => c.rank === openCard.rank && c.suit !== openCard.suit && !c.isJoker && (wildJokerRank ? c.rank !== wildJokerRank : true)
-  );
-  if (sameRankCards.length >= 2) {
-    return true; // Completes 3 or 4-of-a-kind set!
-  }
+    // 2. Check if taking openCard would produce an immediate winning show
+    if (wildJokerRank && botHand.length >= 13) {
+      try {
+        const simulated14 = [...botHand, openCard];
+        const sorted14 = autoSortHand(simulated14, wildJokerRank);
+        if (Array.isArray(sorted14) && sorted14.length > 0) {
+          const validCheck = validateRummyHand(sorted14.slice(0, 4), wildJokerRank);
+          if (validCheck.isValidDeclaration || (validCheck.hasPureSequence && validCheck.sequencesCount >= 2)) {
+            return true; // Game winning pick!
+          }
+        }
+      } catch {
+        // Ignore sorting edge cases safely
+      }
+    }
 
-  // 5. If open card is high deadwood (10 pts) and doesn't directly complete a meld, refuse it
-  if (openCard.points === 10) {
+    // 3. Check if open card completes or extends a Pure Sequence in same suit
+    const sameSuitCards = botHand.filter(
+      (c) => c && c.suit === openCard.suit && !c.isJoker && (wildJokerRank ? c.rank !== wildJokerRank : true)
+    );
+    if (sameSuitCards.length >= 2) {
+      const rankValues = sameSuitCards.map((c) => c.value);
+      const targetVal = openCard.value;
+      const hasAdj1 = rankValues.includes(targetVal - 1);
+      const hasAdj2 = rankValues.includes(targetVal + 1);
+      const hasSkip1 = rankValues.includes(targetVal - 2);
+      const hasSkip2 = rankValues.includes(targetVal + 2);
+
+      // Adjacent on both sides (e.g. 4 and 6, open card is 5)
+      if (hasAdj1 && hasAdj2) return true;
+      // Inside connectors
+      if (hasAdj1 && hasSkip2) return true;
+      if (hasAdj2 && hasSkip1) return true;
+      // Two consecutive in hand, open card extends either side
+      if ((hasAdj1 && rankValues.includes(targetVal - 2)) || (hasAdj2 && rankValues.includes(targetVal + 2))) {
+        return true;
+      }
+    }
+
+    // 4. Check if open card completes a Set (same rank, different suits)
+    const sameRankCards = botHand.filter(
+      (c) => c && c.rank === openCard.rank && c.suit !== openCard.suit && !c.isJoker && (wildJokerRank ? c.rank !== wildJokerRank : true)
+    );
+    if (sameRankCards.length >= 2) {
+      return true; // Completes 3 or 4-of-a-kind set!
+    }
+
+    // 5. If open card is high deadwood (10 pts) and doesn't directly complete a meld, refuse it
+    if (openCard.points === 10) {
+      return false;
+    }
+
+    return false;
+  } catch {
     return false;
   }
-
-  return false;
 }
 
 /**
  * Advanced Discard AI: Chooses the optimal card for the bot to discard.
  * Preserves formed sequences/sets, retains connected potential runs,
  * and dumps isolated high-point deadwood (Kings, Queens, Jacks, 10s).
+ * Guaranteed to return a valid PlayingCard without ever crashing.
  */
 export function chooseBotOptimalDiscard(
   hand: PlayingCard[],
   wildJokerRank: Rank | null,
   smartDiscardEnabled: boolean
 ): PlayingCard {
-  if (!smartDiscardEnabled || hand.length === 0) {
-    return hand[0];
+  const fallbackCard: PlayingCard = {
+    id: `safe_card_${Date.now()}`,
+    suit: 'clubs',
+    rank: '7',
+    value: 7,
+    points: 7,
+  };
+
+  if (!hand || !Array.isArray(hand) || hand.length === 0) {
+    return fallbackCard;
   }
 
-  // Never discard a wild joker or printed joker
-  const nonJokers = hand.filter(
-    (c) => !c.isJoker && c.value > 0 && (wildJokerRank ? c.rank !== wildJokerRank : true)
-  );
-  const pool = nonJokers.length > 0 ? nonJokers : hand;
+  // Filter out invalid items
+  const validHand = hand.filter(Boolean);
+  if (validHand.length === 0) return fallbackCard;
 
-  // Group hand with autoSortHand to identify melded cards vs deadwood
-  let meldedCardIds = new Set<string>();
-  if (wildJokerRank) {
-    const groups = autoSortHand(hand, wildJokerRank);
-    for (const grp of groups) {
-      if (isPureSequence(grp) || isImpureSequence(grp, wildJokerRank) || isValidSet(grp, wildJokerRank)) {
-        grp.forEach((c) => meldedCardIds.add(c.id));
-      }
-    }
+  if (!smartDiscardEnabled) {
+    return validHand[0];
   }
 
-  // Score each card by deadwood penalty priority
-  const scored = pool.map((card) => {
-    let penaltyScore = card.points; // Base face value (10 for A, K, Q, J, 10)
+  try {
+    // Never discard a wild joker or printed joker
+    const nonJokers = validHand.filter(
+      (c) => !c.isJoker && c.value > 0 && (wildJokerRank ? c.rank !== wildJokerRank : true)
+    );
+    const pool = nonJokers.length > 0 ? nonJokers : validHand;
 
-    // Heavily penalize discarding a card that is already part of a valid meld!
-    if (meldedCardIds.has(card.id)) {
-      penaltyScore -= 200;
-    }
-
-    // Check suit connectivity with other non-jokers
-    const sameSuitCards = pool.filter((c) => c.suit === card.suit && c.id !== card.id);
-    const hasDirectNeighbour = sameSuitCards.some((c) => Math.abs(c.value - card.value) === 1);
-    const hasGapNeighbour = sameSuitCards.some((c) => Math.abs(c.value - card.value) === 2);
-
-    if (!hasDirectNeighbour && !hasGapNeighbour) {
-      penaltyScore += 35; // Completely isolated suit, top discard candidate!
-    } else if (hasDirectNeighbour) {
-      penaltyScore -= 25; // Keep connected run
-    }
-
-    // Check rank connectivity (pairs/sets)
-    const sameRankCount = pool.filter((c) => c.rank === card.rank && c.id !== card.id).length;
-    if (sameRankCount === 0) {
-      penaltyScore += 18;
-    } else if (sameRankCount >= 1) {
-      // Check for duplicate suit (e.g. two 8♠ in 2-deck rummy)
-      const hasDuplicateSuit = pool.some((c) => c.rank === card.rank && c.suit === card.suit && c.id !== card.id);
-      if (hasDuplicateSuit) {
-        penaltyScore += 30; // Discard redundant duplicate!
-      } else {
-        penaltyScore -= sameRankCount * 20; // Part of potential set, protect it!
+    // Group hand with autoSortHand to identify melded cards vs deadwood
+    let meldedCardIds = new Set<string>();
+    if (wildJokerRank) {
+      try {
+        const groups = autoSortHand(validHand, wildJokerRank);
+        if (Array.isArray(groups)) {
+          for (const grp of groups) {
+            if (Array.isArray(grp) && (isPureSequence(grp) || isImpureSequence(grp, wildJokerRank) || isValidSet(grp, wildJokerRank))) {
+              grp.forEach((c) => {
+                if (c && c.id) meldedCardIds.add(c.id);
+              });
+            }
+          }
+        }
+      } catch {
+        // Safe fallback if grouping throws
       }
     }
 
-    return { card, score: penaltyScore };
-  });
+    // Score each card by deadwood penalty priority
+    const scored = pool.map((card) => {
+      let penaltyScore = card.points || 0; // Base face value (10 for A, K, Q, J, 10)
 
-  // Sort by highest penalty score descending (first card is best discard)
-  scored.sort((a, b) => b.score - a.score);
-  return scored[0]?.card || hand[0];
+      // Heavily penalize discarding a card that is already part of a valid meld!
+      if (meldedCardIds.has(card.id)) {
+        penaltyScore -= 200;
+      }
+
+      // Check suit connectivity with other non-jokers
+      const sameSuitCards = pool.filter((c) => c && c.suit === card.suit && c.id !== card.id);
+      const hasDirectNeighbour = sameSuitCards.some((c) => Math.abs(c.value - card.value) === 1);
+      const hasGapNeighbour = sameSuitCards.some((c) => Math.abs(c.value - card.value) === 2);
+
+      if (!hasDirectNeighbour && !hasGapNeighbour) {
+        penaltyScore += 35; // Completely isolated suit, top discard candidate!
+      } else if (hasDirectNeighbour) {
+        penaltyScore -= 25; // Keep connected run
+      }
+
+      // Check rank connectivity (pairs/sets)
+      const sameRankCount = pool.filter((c) => c && c.rank === card.rank && c.id !== card.id).length;
+      if (sameRankCount === 0) {
+        penaltyScore += 18;
+      } else if (sameRankCount >= 1) {
+        // Check for duplicate suit (e.g. two 8♠ in 2-deck rummy)
+        const hasDuplicateSuit = pool.some((c) => c && c.rank === card.rank && c.suit === card.suit && c.id !== card.id);
+        if (hasDuplicateSuit) {
+          penaltyScore += 30; // Discard redundant duplicate!
+        } else {
+          penaltyScore -= sameRankCount * 20; // Part of potential set, protect it!
+        }
+      }
+
+      return { card, score: penaltyScore };
+    });
+
+    // Sort by highest penalty score descending (first card is best discard)
+    scored.sort((a, b) => b.score - a.score);
+    return scored[0]?.card || validHand[0];
+  } catch {
+    return validHand[0];
+  }
 }
 
 /**
@@ -469,55 +534,66 @@ export function shouldBotDeclareWin(params: {
   aiMode: BotSettings['aiMode'];
   forceWinner: 'NONE' | 'BOT' | 'PLAYER';
 }): boolean {
-  const {
-    botTurnsCount,
-    botHand,
-    wildJokerRank,
-    botWinRatePercent,
-    aiMode,
-    forceWinner,
-  } = params;
+  try {
+    const {
+      botTurnsCount = 0,
+      botHand,
+      wildJokerRank,
+      botWinRatePercent = 97,
+      aiMode = 'MASTER_97',
+      forceWinner = 'NONE',
+    } = params;
 
-  // 1. Force Winner Override from Admin Panel
-  if (forceWinner === 'BOT') return true;
-  if (forceWinner === 'PLAYER') return false;
+    // 1. Force Winner Override from Admin Panel
+    if (forceWinner === 'BOT') return true;
+    if (forceWinner === 'PLAYER') return false;
 
-  // 2. Minimum turn check so bots don't declare on turn 0 before dealing completes
-  if (botTurnsCount < 3) return false;
+    // 2. Minimum turn check so bots don't declare on turn 0 before dealing completes
+    if (botTurnsCount < 3) return false;
 
-  // 3. Genuine Hand Check: if the bot's 14 cards form a full valid declaration
-  if (wildJokerRank && botHand.length >= 13) {
-    const groups = autoSortHand(botHand, wildJokerRank);
-    const validation = validateRummyHand(groups.slice(0, 4), wildJokerRank);
-    if (validation.isValidDeclaration) {
-      return true; // Genuine winning declare!
+    if (!botHand || !Array.isArray(botHand) || botHand.length < 13) {
+      return false;
     }
-  }
 
-  // 4. Strategic Win Rate Progression based on AI Mode:
-  if (aiMode === 'MASTER_97') {
-    // Master 97% Bot Win Rate:
-    // Matures hand rapidly between turn 4 and 8.
-    const baseWinChance = Math.min(0.97, (botTurnsCount - 3) * 0.28 + 0.38);
-    const winRoll = Math.random();
-    return winRoll < (baseWinChance * (botWinRatePercent / 100));
-  }
+    // 3. Genuine Hand Check: if the bot's 14 cards form a full valid declaration
+    if (wildJokerRank && botHand.length >= 13) {
+      try {
+        const groups = autoSortHand(botHand, wildJokerRank);
+        if (Array.isArray(groups) && groups.length > 0) {
+          const validation = validateRummyHand(groups.slice(0, 4), wildJokerRank);
+          if (validation.isValidDeclaration) {
+            return true; // Genuine winning declare!
+          }
+        }
+      } catch {
+        // Safe fallback
+      }
+    }
 
-  if (aiMode === 'PLAYER_ADVANTAGE_67_78') {
-    // Real Player Target Win Rate (67% - 78%):
-    if (botTurnsCount < 7) return false;
-    const botChance = 1 - (params.playerTargetWinRatePercent / 100);
-    return Math.random() < (botChance * 0.3);
-  }
+    // 4. Strategic Win Rate Progression based on AI Mode:
+    if (aiMode === 'MASTER_97') {
+      const baseWinChance = Math.min(0.97, (botTurnsCount - 3) * 0.28 + 0.38);
+      const winRoll = Math.random();
+      return winRoll < (baseWinChance * (botWinRatePercent / 100));
+    }
 
-  if (aiMode === 'BALANCED_50') {
-    if (botTurnsCount < 5) return false;
-    return Math.random() < 0.45;
-  }
+    if (aiMode === 'PLAYER_ADVANTAGE_67_78') {
+      if (botTurnsCount < 7) return false;
+      const botChance = 1 - (params.playerTargetWinRatePercent / 100);
+      return Math.random() < (botChance * 0.3);
+    }
 
-  // Custom AI Mode
-  const customChance = (botWinRatePercent / 100) * Math.min(1.0, (botTurnsCount - 2) * 0.22);
-  return Math.random() < customChance;
+    if (aiMode === 'BALANCED_50') {
+      if (botTurnsCount < 5) return false;
+      return Math.random() < 0.45;
+    }
+
+    // Custom AI Mode
+    const customChance = (botWinRatePercent / 100) * Math.min(1.0, (botTurnsCount - 2) * 0.22);
+    return Math.random() < customChance;
+  } catch {
+    return false;
+  }
 }
 
 /**

@@ -536,15 +536,20 @@ export const RummyTable: React.FC = () => {
       }
     }
 
-    // 1. Native Capacitor Screen Orientation (for Android APK / device)
+    // 1. Native Capacitor Screen Orientation (ONLY on native Android APK device)
     try {
-      await ScreenOrientation.lock({ orientation: 'landscape' });
+      if (typeof window !== 'undefined' && (window as any).Capacitor?.isNativePlatform?.()) {
+        await ScreenOrientation.lock({ orientation: 'landscape' }).catch(() => {});
+      }
     } catch {}
 
-    // 2. Web Screen Orientation API
+    // 2. Web Screen Orientation API (Only if supported and returns promise)
     try {
-      if (typeof window !== 'undefined' && 'screen' in window && window.screen.orientation) {
-        await (window.screen.orientation as any).lock?.('landscape');
+      if (typeof window !== 'undefined' && 'screen' in window && window.screen.orientation && typeof (window.screen.orientation as any).lock === 'function') {
+        const p = (window.screen.orientation as any).lock('landscape');
+        if (p && typeof p.catch === 'function') {
+          await p.catch(() => {});
+        }
       }
     } catch {}
 
@@ -553,17 +558,21 @@ export const RummyTable: React.FC = () => {
     }, 1400);
   };
 
-  // Trigger auto-rotate immediately upon game start / table launch
+  // Trigger auto-rotate safely upon game start / table launch
   useEffect(() => {
-    lockLandscape();
+    try {
+      lockLandscape();
+    } catch {}
 
     return () => {
       try {
-        ScreenOrientation.unlock().catch(() => {});
+        if (typeof window !== 'undefined' && (window as any).Capacitor?.isNativePlatform?.()) {
+          ScreenOrientation.unlock().catch(() => {});
+        }
       } catch {}
       try {
-        if (typeof window !== 'undefined' && 'screen' in window && window.screen.orientation) {
-          (window.screen.orientation as any).unlock?.();
+        if (typeof window !== 'undefined' && 'screen' in window && window.screen.orientation && typeof (window.screen.orientation as any).unlock === 'function') {
+          (window.screen.orientation as any).unlock();
         }
       } catch {}
     };
@@ -599,18 +608,25 @@ export const RummyTable: React.FC = () => {
     setTurnTimer(30);
 
     // List of active seated players from current table seats
-    const activeOpponents = seats.filter(
+    const currentSeats = seats && seats.length > 0 ? seats : createTableOpponents(playersMode === 2 ? 1 : 5, gameVariant, entryFee);
+    if (!seats || seats.length === 0) {
+      setSeats(currentSeats);
+    }
+
+    const activeOpponents = currentSeats.filter(
       (s: SeatPlayer) => s.status !== 'ELIMINATED'
     );
 
+    const safeOpponents = activeOpponents.length > 0 ? activeOpponents : currentSeats;
+
     const allSeated = [
       {
-        userId: currentUser.id,
+        userId: currentUser?.id || 'player_user',
         seatIndex: 0,
-        playerName: `${currentUser.username} (You)`,
-        avatar: currentUser.avatar,
+        playerName: `${currentUser?.username || 'Player'} (You)`,
+        avatar: currentUser?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80',
       },
-      ...activeOpponents.map((s: SeatPlayer, idx: number) => ({
+      ...safeOpponents.map((s: SeatPlayer, idx: number) => ({
         userId: s.id,
         seatIndex: idx + 1,
         playerName: s.name,
@@ -619,10 +635,15 @@ export const RummyTable: React.FC = () => {
     ];
 
     // 1. Determine Toss Result
-    const tossResult: TossResult =
-      isMultiplayer && multiplayerSession?.toss_result
-        ? multiplayerSession.toss_result
-        : executeRummyToss(allSeated, roundNum);
+    let tossResult: TossResult;
+    try {
+      tossResult =
+        isMultiplayer && multiplayerSession?.toss_result
+          ? multiplayerSession.toss_result
+          : executeRummyToss(allSeated, roundNum);
+    } catch {
+      tossResult = executeRummyToss(allSeated, roundNum);
+    }
 
     const isMeDealer = tossResult.dealerSeatIndex === 0;
     setIsUserDealer(isMeDealer);
@@ -984,7 +1005,7 @@ export const RummyTable: React.FC = () => {
           wildJokerRank,
           botSettings?.smartDiscardEnabled ?? true
         );
-        const finalMeldedCards = updatedBotHand.filter((c) => c.id !== finishCard.id);
+        const finalMeldedCards = updatedBotHand.filter((c) => Boolean(c && finishCard && c.id !== finishCard.id));
         opponentHandsRef.current[bot.id] = finalMeldedCards;
 
         setTimeout(() => {
@@ -1025,15 +1046,15 @@ export const RummyTable: React.FC = () => {
           botSettings?.smartDiscardEnabled ?? true
         );
 
-        // Update bot's in-memory hand
-        opponentHandsRef.current[bot.id] = updatedBotHand.filter((c) => c.id !== discardCard.id);
+        // Update bot's in-memory hand safely
+        opponentHandsRef.current[bot.id] = updatedBotHand.filter((c) => Boolean(c && discardCard && c.id !== discardCard.id));
 
         setSeats((prev) =>
           prev.map((s, idx) =>
             idx === botIndex
               ? {
                   ...s,
-                  actionStatus: `Discarding ${discardCard.rank}${getSuitSymbol(discardCard.suit)}...`,
+                  actionStatus: `Discarding ${discardCard?.rank || '7'}${getSuitSymbol(discardCard?.suit || 'clubs')}...`,
                   cardsCount: 13,
                 }
               : s
@@ -1060,7 +1081,7 @@ export const RummyTable: React.FC = () => {
                 idx === botIndex
                   ? {
                       ...s,
-                      actionStatus: `Discarded ${discardCard.rank}${getSuitSymbol(discardCard.suit)}`,
+                      actionStatus: `Discarded ${discardCard?.rank || '7'}${getSuitSymbol(discardCard?.suit || 'clubs')}`,
                     }
                   : s
               )
