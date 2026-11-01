@@ -2246,6 +2246,13 @@ export const RummyTable: React.FC = () => {
 
   const handleExit = () => {
     sounds.playCardClick();
+    if (isMultiplayer) {
+      try {
+        multiplayerService.cleanupAllSubscriptions();
+      } catch (e) {
+        console.warn('Realtime cleanup error on exit:', e);
+      }
+    }
     try {
       ScreenOrientation.unlock().catch(() => {});
     } catch {}

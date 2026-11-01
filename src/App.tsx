@@ -107,6 +107,9 @@ const MainApp: React.FC = () => {
     setIsLoadingScreen(false);
   };
 
+  // Key to force clean remount on Table Auto-Recovery Restart
+  const [tableRestartKey, setTableRestartKey] = useState<number>(0);
+
   // If in Admin Mode, show Admin Panel
   if (viewMode === 'ADMIN') {
     return <AdminPanel onSwitchToPlayer={handleSwitchToPlayer} />;
@@ -115,8 +118,13 @@ const MainApp: React.FC = () => {
   // If game is active
   if (activeScreen === 'GAME_TABLE' && activeGameConfig) {
     return (
-      <ErrorBoundary onReset={() => setActiveScreen('LOBBY')}>
-        <RummyTable />
+      <ErrorBoundary
+        key={`table-boundary-${tableRestartKey}`}
+        onReset={() => setActiveScreen('LOBBY')}
+        onRestartTable={() => setTableRestartKey((prev) => prev + 1)}
+        onReturnToLobby={() => setActiveScreen('LOBBY')}
+      >
+        <RummyTable key={`rummy-table-${tableRestartKey}`} />
       </ErrorBoundary>
     );
   }

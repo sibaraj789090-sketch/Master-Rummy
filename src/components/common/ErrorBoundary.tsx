@@ -1,10 +1,13 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { RotateCcw, Home, AlertTriangle, ShieldAlert } from 'lucide-react';
+import { multiplayerService } from '../../services/multiplayerService';
 
 interface Props {
   children: ReactNode;
   fallbackMessage?: string;
   onReset?: () => void;
+  onRestartTable?: () => void;
+  onReturnToLobby?: () => void;
 }
 
 interface State {
@@ -33,8 +36,15 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   handleReload = () => {
+    try {
+      multiplayerService.cleanupAllSubscriptions();
+    } catch (e) {
+      console.warn('Realtime cleanup error on recovery:', e);
+    }
     this.setState({ hasError: false, error: null, errorInfo: null });
-    if (this.props.onReset) {
+    if (this.props.onRestartTable) {
+      this.props.onRestartTable();
+    } else if (this.props.onReset) {
       this.props.onReset();
     } else {
       window.location.reload();
@@ -42,8 +52,15 @@ export class ErrorBoundary extends Component<Props, State> {
   };
 
   handleReturnToLobby = () => {
+    try {
+      multiplayerService.cleanupAllSubscriptions();
+    } catch (e) {
+      console.warn('Realtime cleanup error on return:', e);
+    }
     this.setState({ hasError: false, error: null, errorInfo: null });
-    if (this.props.onReset) {
+    if (this.props.onReturnToLobby) {
+      this.props.onReturnToLobby();
+    } else if (this.props.onReset) {
       this.props.onReset();
     } else if (typeof window !== 'undefined') {
       window.location.href = '/';

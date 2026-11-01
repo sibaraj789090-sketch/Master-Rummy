@@ -24,6 +24,40 @@ import { TossResult } from '../types/rummy';
 
 export type { GameRoom, RoomPlayer, GameSession, PlayerGameState, LeaderboardEntry };
 
+interface RoomCallbacks {
+  onRoomChange?: (room: GameRoom) => void;
+  onPlayersChange?: (players: RoomPlayer[]) => void;
+  onSessionChange?: (session: GameSession) => void;
+}
+
+interface SessionCallbacks {
+  onSessionChange?: (session: GameSession) => void;
+  onMove?: (move: any) => void;
+  onFinished?: (winnerId: string) => void;
+}
+
+interface ManagedRoomSubscription {
+  roomId: string;
+  topicName: string;
+  channel: any;
+  status: 'connecting' | 'subscribed' | 'error' | 'closed';
+  listeners: Map<string, RoomCallbacks>;
+  reconnectAttempts: number;
+  reconnectTimeout: any;
+  broadcastHandler?: (e: MessageEvent) => void;
+}
+
+interface ManagedSessionSubscription {
+  sessionId: string;
+  topicName: string;
+  channel: any;
+  status: 'connecting' | 'subscribed' | 'error' | 'closed';
+  listeners: Map<string, SessionCallbacks>;
+  reconnectAttempts: number;
+  reconnectTimeout: any;
+  broadcastHandler?: (e: MessageEvent) => void;
+}
+
 // Local In-Memory & BroadcastChannel store for zero-latency cross-tab & offline testing
 const broadcastChannel =
   typeof window !== 'undefined' && 'BroadcastChannel' in window
@@ -35,6 +69,28 @@ class MultiplayerService {
   private localPlayers: Map<string, RoomPlayer[]> = new Map();
   private localSessions: Map<string, GameSession> = new Map();
   private localPlayerStates: Map<string, PlayerGameState[]> = new Map();
+
+  // Managed Realtime Channels & Event Deduplication
+  private managedRooms: Map<string, ManagedRoomSubscription> = new Map();
+  private managedSessions: Map<string, ManagedSessionSubscription> = new Map();
+  private recentEventsCache: Map<string, number> = new Map();
+
+  private isDuplicateEvent(eventKey: string, windowMs = 2500): boolean {
+    const now = Date.now();
+    if (this.recentEventsCache.size > 300) {
+      for (const [key, ts] of this.recentEventsCache.entries()) {
+        if (now - ts > 15000) {
+          this.recentEventsCache.delete(key);
+        }
+      }
+    }
+    const lastTime = this.recentEventsCache.get(eventKey);
+    if (lastTime && now - lastTime < windowMs) {
+      return true;
+    }
+    this.recentEventsCache.set(eventKey, now);
+    return false;
+  }
 
   constructor() {
     if (broadcastChannel) {
@@ -475,122 +531,260 @@ class MultiplayerService {
     return session;
   }
 
-  // 6. Realtime Room Listener (Supabase Realtime Channel)
+  // 6. Realtime Room Listener (Supabase Realtime Channel Manager)
   subscribeToRoom(
     roomId: string,
-    callbacks: {
-      onRoomChange?: (room: GameRoom) => void;
-      onPlayersChange?: (players: RoomPlayer[]) => void;
-      onSessionChange?: (session: GameSession) => void;
-    }
+    callbacks: RoomCallbacks
   ): () => void {
-    const config = getSupabaseConfig();
-    let supabaseChannel: any = null;
+    const cleanRoomId = (roomId || '').trim();
+    if (!cleanRoomId) return () => {};
 
-    if (config.isConfigured) {
-      try {
-        // Clean up any pre-existing channel with this room prefix to prevent Supabase Realtime "cannot add callbacks after subscribe()"
+    const listenerId = `rl_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    let managed = this.managedRooms.get(cleanRoomId);
+
+    if (managed) {
+      // Channel already exists!
+      // NEVER call .on() on an already-subscribed channel.
+      // Simply register this subscriber's callbacks to receive events.
+      managed.listeners.set(listenerId, callbacks);
+    } else {
+      // First subscriber for this room.
+      // Avoid duplicate prefix like "room_room_"
+      const topicName = cleanRoomId.startsWith('room_') ? cleanRoomId : `room_${cleanRoomId}`;
+      managed = {
+        roomId: cleanRoomId,
+        topicName,
+        channel: null,
+        status: 'connecting',
+        listeners: new Map([[listenerId, callbacks]]),
+        reconnectAttempts: 0,
+        reconnectTimeout: null,
+      };
+      this.managedRooms.set(cleanRoomId, managed);
+
+      // Register ALL postgres_changes event listeners BEFORE calling .subscribe()
+      this.initRoomChannel(managed);
+    }
+
+    // Cross-tab broadcast channel fallback
+    if (broadcastChannel && !managed.broadcastHandler) {
+      const handler = (e: MessageEvent) => {
         try {
-          const channels = supabase.getChannels();
-          for (const ch of channels) {
-            if (ch.topic && ch.topic.includes(`room_${roomId}`)) {
-              supabase.removeChannel(ch);
+          const { type, payload } = e.data || {};
+          if (!payload) return;
+          const currentManaged = this.managedRooms.get(cleanRoomId);
+          if (!currentManaged) return;
+
+          if (type === 'ROOM_UPDATED' && payload.id === cleanRoomId) {
+            if (!this.isDuplicateEvent(`bcast_room_${cleanRoomId}_${payload.status}`)) {
+              for (const cb of currentManaged.listeners.values()) {
+                cb.onRoomChange?.(payload);
+              }
+            }
+          } else if (type === 'PLAYERS_UPDATED' && payload.roomId === cleanRoomId) {
+            if (!this.isDuplicateEvent(`bcast_players_${cleanRoomId}_${Date.now()}`, 600)) {
+              for (const cb of currentManaged.listeners.values()) {
+                cb.onPlayersChange?.(payload.players);
+              }
+            }
+          } else if (type === 'SESSION_UPDATED' && payload.room_id === cleanRoomId) {
+            if (!this.isDuplicateEvent(`bcast_sess_${cleanRoomId}_${payload.id}_${payload.current_turn_seat}`)) {
+              for (const cb of currentManaged.listeners.values()) {
+                cb.onSessionChange?.(payload);
+              }
             }
           }
-        } catch (cleanupErr) {
-          console.warn('Channel cleanup warning:', cleanupErr);
+        } catch (handlerErr) {
+          console.warn('Error in room broadcast handler:', handlerErr);
         }
+      };
 
-        // Always create with a unique channel name for this subscription instance
-        const channelName = `room_${roomId}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-        supabaseChannel = supabase
-          .channel(channelName)
-          .on(
-            'postgres_changes',
-            { event: '*', schema: 'public', table: 'game_rooms', filter: `id=eq.${roomId}` },
-            (payload) => {
-              if (callbacks.onRoomChange && payload.new) {
-                callbacks.onRoomChange(payload.new as GameRoom);
-              }
-            }
-          )
-          .on(
-            'postgres_changes',
-            { event: '*', schema: 'public', table: 'room_players', filter: `room_id=eq.${roomId}` },
-            async () => {
-              if (callbacks.onPlayersChange) {
-                try {
-                  const { data } = await supabase
-                    .from('room_players')
-                    .select('*')
-                    .eq('room_id', roomId)
-                    .order('seat_index');
-                  if (data) callbacks.onPlayersChange(data as RoomPlayer[]);
-                } catch (fetchErr) {
-                  console.warn('Error fetching room players on change:', fetchErr);
-                }
-              }
-            }
-          )
-          .on(
-            'postgres_changes',
-            { event: '*', schema: 'public', table: 'game_sessions', filter: `room_id=eq.${roomId}` },
-            (payload) => {
-              if (callbacks.onSessionChange && payload.new) {
-                callbacks.onSessionChange(payload.new as GameSession);
-              }
-            }
-          )
-          .subscribe();
-      } catch (err) {
-        console.warn('Realtime subscribeToRoom encountered an error:', err);
-      }
-    }
-
-    // Local / cross-tab broadcast subscription
-    const handler = (e: MessageEvent) => {
-      try {
-        const { type, payload } = e.data || {};
-        if (type === 'ROOM_UPDATED' && payload?.id === roomId && callbacks.onRoomChange) {
-          callbacks.onRoomChange(payload);
-        } else if (
-          type === 'PLAYERS_UPDATED' &&
-          payload?.roomId === roomId &&
-          callbacks.onPlayersChange
-        ) {
-          callbacks.onPlayersChange(payload.players);
-        } else if (
-          type === 'SESSION_UPDATED' &&
-          payload?.room_id === roomId &&
-          callbacks.onSessionChange
-        ) {
-          callbacks.onSessionChange(payload);
-        }
-      } catch (handlerErr) {
-        console.warn('Error in room broadcast handler:', handlerErr);
-      }
-    };
-
-    if (broadcastChannel) {
+      managed.broadcastHandler = handler;
       broadcastChannel.addEventListener('message', handler);
     }
 
     return () => {
-      if (supabaseChannel) {
-        try {
-          supabase.removeChannel(supabaseChannel);
-        } catch (e) {
-          console.warn('Error removing room Supabase channel:', e);
+      this.unsubscribeFromRoom(cleanRoomId, listenerId);
+    };
+  }
+
+  // Initialize room channel ensuring ALL postgres_changes are registered BEFORE .subscribe()
+  private initRoomChannel(managed: ManagedRoomSubscription) {
+    const config = getSupabaseConfig();
+    if (!config.isConfigured) return;
+
+    try {
+      // 1. Clean up any existing channel with this topic in Supabase client to prevent duplicate channel warnings
+      try {
+        const channels = supabase.getChannels();
+        for (const ch of channels) {
+          if (ch.topic === `realtime:${managed.topicName}` || ch.topic === managed.topicName) {
+            supabase.removeChannel(ch);
+          }
         }
+      } catch (cleanupErr) {
+        console.warn('Channel cleanup warning:', cleanupErr);
       }
-      if (broadcastChannel) {
+
+      // 2. Create fresh channel
+      const channel = supabase.channel(managed.topicName);
+      managed.channel = channel;
+
+      // 3. Register ALL postgres_changes listeners BEFORE .subscribe()
+      channel
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'game_rooms', filter: `id=eq.${managed.roomId}` },
+          (payload) => {
+            if (payload.new) {
+              const eventKey = `pr_room_${managed.roomId}_${(payload.new as any).id}_${(payload as any).commit_timestamp || (payload.new as any).status}`;
+              if (this.isDuplicateEvent(eventKey)) return;
+              for (const cb of managed.listeners.values()) {
+                cb.onRoomChange?.(payload.new as GameRoom);
+              }
+            }
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'room_players', filter: `room_id=eq.${managed.roomId}` },
+          async (payload) => {
+            const eventKey = `pr_players_${managed.roomId}_${(payload as any).commit_timestamp || Date.now()}`;
+            if (this.isDuplicateEvent(eventKey, 800)) return;
+            try {
+              const { data } = await supabase
+                .from('room_players')
+                .select('*')
+                .eq('room_id', managed.roomId)
+                .order('seat_index');
+              if (data) {
+                for (const cb of managed.listeners.values()) {
+                  cb.onPlayersChange?.(data as RoomPlayer[]);
+                }
+              }
+            } catch (fetchErr) {
+              console.warn('Error fetching room players:', fetchErr);
+            }
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'game_sessions', filter: `room_id=eq.${managed.roomId}` },
+          (payload) => {
+            if (payload.new) {
+              const sessionData = payload.new as GameSession;
+              const eventKey = `pr_sess_${managed.roomId}_${sessionData.id}_${sessionData.status}_${sessionData.current_turn_seat}`;
+              if (this.isDuplicateEvent(eventKey)) return;
+              for (const cb of managed.listeners.values()) {
+                cb.onSessionChange?.(sessionData);
+              }
+            }
+          }
+        );
+
+      // 4. Now subscribe with connection status callback
+      channel.subscribe((status: string, err?: any) => {
+        if (status === 'SUBSCRIBED') {
+          managed.status = 'subscribed';
+          managed.reconnectAttempts = 0;
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          managed.status = 'error';
+          console.warn(`[Realtime Room ${managed.roomId}] status: ${status}`, err);
+          if (status !== 'CLOSED') {
+            this.handleRoomReconnect(managed);
+          }
+        }
+      });
+    } catch (err) {
+      console.warn('Realtime initRoomChannel encountered an error:', err);
+    }
+  }
+
+  // Handle safe reconnection for room channel
+  private handleRoomReconnect(managed: ManagedRoomSubscription) {
+    if (managed.listeners.size === 0) return;
+    if (managed.reconnectAttempts >= 5) {
+      console.warn(`[Realtime Room ${managed.roomId}] Max reconnect attempts reached.`);
+      return;
+    }
+    managed.reconnectAttempts++;
+    const delay = Math.min(1000 * Math.pow(2, managed.reconnectAttempts - 1), 8000);
+
+    if (managed.reconnectTimeout) {
+      clearTimeout(managed.reconnectTimeout);
+    }
+
+    managed.reconnectTimeout = setTimeout(() => {
+      if (managed.listeners.size > 0) {
+        if (managed.channel) {
+          try {
+            supabase.removeChannel(managed.channel);
+          } catch (e) {
+            // ignore
+          }
+          managed.channel = null;
+        }
+        this.initRoomChannel(managed);
+      }
+    }, delay);
+  }
+
+  // Unsubscribe a specific listener; only remove Supabase channel when no listeners remain
+  private unsubscribeFromRoom(roomId: string, listenerId: string) {
+    const managed = this.managedRooms.get(roomId);
+    if (!managed) return;
+
+    managed.listeners.delete(listenerId);
+
+    if (managed.listeners.size === 0) {
+      if (managed.reconnectTimeout) {
+        clearTimeout(managed.reconnectTimeout);
+        managed.reconnectTimeout = null;
+      }
+      if (managed.broadcastHandler && broadcastChannel) {
         try {
-          broadcastChannel.removeEventListener('message', handler);
+          broadcastChannel.removeEventListener('message', managed.broadcastHandler);
+        } catch (e) {
+          // ignore
+        }
+        managed.broadcastHandler = undefined;
+      }
+      if (managed.channel) {
+        try {
+          supabase.removeChannel(managed.channel);
+        } catch (err) {
+          console.warn('Error removing room Supabase channel:', err);
+        }
+        managed.channel = null;
+      }
+      this.managedRooms.delete(roomId);
+    }
+  }
+
+  // Explicit room cleanup
+  cleanupRoom(roomId: string) {
+    const cleanId = (roomId || '').trim();
+    const managed = this.managedRooms.get(cleanId);
+    if (managed) {
+      if (managed.reconnectTimeout) clearTimeout(managed.reconnectTimeout);
+      if (managed.broadcastHandler && broadcastChannel) {
+        try {
+          broadcastChannel.removeEventListener('message', managed.broadcastHandler);
         } catch (e) {
           // ignore
         }
       }
-    };
+      if (managed.channel) {
+        try {
+          supabase.removeChannel(managed.channel);
+        } catch (e) {
+          // ignore
+        }
+        managed.channel = null;
+      }
+      managed.listeners.clear();
+      this.managedRooms.delete(cleanId);
+    }
   }
 
   // 3b. Join Room by 6-digit Code
@@ -1216,94 +1410,297 @@ class MultiplayerService {
     return session;
   }
 
-  // 6b. Subscribe to Active Game Session
+  // 6b. Subscribe to Active Game Session (Supabase Realtime Channel Manager)
   subscribeToSession(
     sessionId: string,
-    callbacks: {
-      onSessionChange?: (session: GameSession) => void;
-      onMove?: (move: any) => void;
-      onFinished?: (winnerId: string) => void;
-    }
+    callbacks: SessionCallbacks
   ): () => void {
-    const config = getSupabaseConfig();
-    let supabaseChannel: any = null;
+    const cleanSessionId = (sessionId || '').trim();
+    if (!cleanSessionId) return () => {};
 
-    if (config.isConfigured) {
-      try {
-        // Clean up any pre-existing channel with this session prefix to prevent Supabase Realtime "cannot add callbacks after subscribe()"
+    const listenerId = `sl_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    let managed = this.managedSessions.get(cleanSessionId);
+
+    if (managed) {
+      // Channel already exists!
+      // NEVER call .on() on an already-subscribed channel.
+      // Simply register this subscriber's callbacks to receive events.
+      managed.listeners.set(listenerId, callbacks);
+    } else {
+      // Avoid double prefix like "session_session_"
+      const topicName = cleanSessionId.startsWith('session_') ? cleanSessionId : `session_${cleanSessionId}`;
+      managed = {
+        sessionId: cleanSessionId,
+        topicName,
+        channel: null,
+        status: 'connecting',
+        listeners: new Map([[listenerId, callbacks]]),
+        reconnectAttempts: 0,
+        reconnectTimeout: null,
+      };
+      this.managedSessions.set(cleanSessionId, managed);
+
+      // Register ALL postgres_changes event listeners BEFORE calling .subscribe()
+      this.initSessionChannel(managed);
+    }
+
+    // Cross-tab broadcast channel fallback
+    if (broadcastChannel && !managed.broadcastHandler) {
+      const handler = (e: MessageEvent) => {
         try {
-          const channels = supabase.getChannels();
-          for (const ch of channels) {
-            if (ch.topic && ch.topic.includes(`session_${sessionId}`)) {
-              supabase.removeChannel(ch);
+          const { type, payload } = e.data || {};
+          if (!payload) return;
+          const currentManaged = this.managedSessions.get(cleanSessionId);
+          if (!currentManaged) return;
+
+          if (type === 'SESSION_UPDATED' && payload.id === cleanSessionId) {
+            if (!this.isDuplicateEvent(`bcast_sess_${cleanSessionId}_${payload.status}_${payload.current_turn_seat}`)) {
+              for (const cb of currentManaged.listeners.values()) {
+                cb.onSessionChange?.(payload);
+              }
+            }
+          } else if (type === 'MOVE_LOGGED' && payload.sessionId === cleanSessionId) {
+            const moveData = payload.move || payload;
+            const moveId = moveData?.id || `${moveData?.seat_index ?? moveData?.seatIndex}_${moveData?.move_type ?? moveData?.moveType}_${Date.now()}`;
+            if (!this.isDuplicateEvent(`bcast_move_${cleanSessionId}_${moveId}`, 1500)) {
+              for (const cb of currentManaged.listeners.values()) {
+                cb.onMove?.(moveData);
+              }
+            }
+          } else if (type === 'GAME_FINISHED' && payload.sessionId === cleanSessionId) {
+            for (const cb of currentManaged.listeners.values()) {
+              cb.onFinished?.(payload.winnerUserId);
             }
           }
-        } catch (cleanupErr) {
-          console.warn('Session channel cleanup warning:', cleanupErr);
+        } catch (handlerErr) {
+          console.warn('Error in session broadcast handler:', handlerErr);
         }
+      };
 
-        const channelName = `session_${sessionId}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-        supabaseChannel = supabase
-          .channel(channelName)
-          .on(
-            'postgres_changes',
-            { event: '*', schema: 'public', table: 'game_sessions', filter: `id=eq.${sessionId}` },
-            (payload) => {
-              if (callbacks.onSessionChange && payload.new) {
-                callbacks.onSessionChange(payload.new as GameSession);
-              }
-            }
-          )
-          .on(
-            'postgres_changes',
-            { event: 'INSERT', schema: 'public', table: 'game_moves', filter: `session_id=eq.${sessionId}` },
-            (payload) => {
-              if (callbacks.onMove && payload.new) {
-                callbacks.onMove(payload.new);
-              }
-            }
-          )
-          .subscribe();
-      } catch (err) {
-        console.warn('Realtime subscribeToSession encountered an error:', err);
-      }
-    }
-
-    const handler = (e: MessageEvent) => {
-      try {
-        const { type, payload } = e.data || {};
-        if (type === 'SESSION_UPDATED' && payload?.id === sessionId && callbacks.onSessionChange) {
-          callbacks.onSessionChange(payload);
-        } else if (type === 'MOVE_LOGGED' && payload?.sessionId === sessionId && callbacks.onMove) {
-          callbacks.onMove(payload);
-        } else if (type === 'GAME_FINISHED' && payload?.sessionId === sessionId && callbacks.onFinished) {
-          callbacks.onFinished(payload.winnerUserId);
-        }
-      } catch (handlerErr) {
-        console.warn('Error in session broadcast handler:', handlerErr);
-      }
-    };
-
-    if (broadcastChannel) {
+      managed.broadcastHandler = handler;
       broadcastChannel.addEventListener('message', handler);
     }
 
     return () => {
-      if (supabaseChannel) {
-        try {
-          supabase.removeChannel(supabaseChannel);
-        } catch (e) {
-          console.warn('Error removing session Supabase channel:', e);
+      this.unsubscribeFromSession(cleanSessionId, listenerId);
+    };
+  }
+
+  // Initialize session channel ensuring ALL postgres_changes are registered BEFORE .subscribe()
+  private initSessionChannel(managed: ManagedSessionSubscription) {
+    const config = getSupabaseConfig();
+    if (!config.isConfigured) return;
+
+    try {
+      try {
+        const channels = supabase.getChannels();
+        for (const ch of channels) {
+          if (ch.topic === `realtime:${managed.topicName}` || ch.topic === managed.topicName) {
+            supabase.removeChannel(ch);
+          }
         }
+      } catch (cleanupErr) {
+        console.warn('Session channel cleanup warning:', cleanupErr);
       }
-      if (broadcastChannel) {
+
+      const channel = supabase.channel(managed.topicName);
+      managed.channel = channel;
+
+      // Register ALL postgres_changes listeners BEFORE calling .subscribe()
+      channel
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'game_sessions', filter: `id=eq.${managed.sessionId}` },
+          (payload) => {
+            if (payload.new) {
+              const sessionData = payload.new as GameSession;
+              const eventKey = `pr_sess_${managed.sessionId}_${sessionData.status}_${sessionData.current_turn_seat}`;
+              if (this.isDuplicateEvent(eventKey)) return;
+              for (const cb of managed.listeners.values()) {
+                cb.onSessionChange?.(sessionData);
+              }
+            }
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'game_moves', filter: `session_id=eq.${managed.sessionId}` },
+          (payload) => {
+            if (payload.new) {
+              const move = payload.new;
+              const moveId = move.id || `${move.seat_index}_${move.move_type}_${(payload as any).commit_timestamp || Date.now()}`;
+              const eventKey = `pr_move_${managed.sessionId}_${moveId}`;
+              if (this.isDuplicateEvent(eventKey, 1500)) return;
+              for (const cb of managed.listeners.values()) {
+                cb.onMove?.(move);
+              }
+            }
+          }
+        );
+
+      channel.subscribe((status: string, err?: any) => {
+        if (status === 'SUBSCRIBED') {
+          managed.status = 'subscribed';
+          managed.reconnectAttempts = 0;
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          managed.status = 'error';
+          console.warn(`[Realtime Session ${managed.sessionId}] status: ${status}`, err);
+          if (status !== 'CLOSED') {
+            this.handleSessionReconnect(managed);
+          }
+        }
+      });
+    } catch (err) {
+      console.warn('Realtime initSessionChannel encountered an error:', err);
+    }
+  }
+
+  // Handle safe reconnection for session channel
+  private handleSessionReconnect(managed: ManagedSessionSubscription) {
+    if (managed.listeners.size === 0) return;
+    if (managed.reconnectAttempts >= 5) {
+      console.warn(`[Realtime Session ${managed.sessionId}] Max reconnect attempts reached.`);
+      return;
+    }
+    managed.reconnectAttempts++;
+    const delay = Math.min(1000 * Math.pow(2, managed.reconnectAttempts - 1), 8000);
+
+    if (managed.reconnectTimeout) {
+      clearTimeout(managed.reconnectTimeout);
+    }
+
+    managed.reconnectTimeout = setTimeout(() => {
+      if (managed.listeners.size > 0) {
+        if (managed.channel) {
+          try {
+            supabase.removeChannel(managed.channel);
+          } catch (e) {
+            // ignore
+          }
+          managed.channel = null;
+        }
+        this.initSessionChannel(managed);
+      }
+    }, delay);
+  }
+
+  // Unsubscribe a specific listener from session channel
+  private unsubscribeFromSession(sessionId: string, listenerId: string) {
+    const managed = this.managedSessions.get(sessionId);
+    if (!managed) return;
+
+    managed.listeners.delete(listenerId);
+
+    if (managed.listeners.size === 0) {
+      if (managed.reconnectTimeout) {
+        clearTimeout(managed.reconnectTimeout);
+        managed.reconnectTimeout = null;
+      }
+      if (managed.broadcastHandler && broadcastChannel) {
         try {
-          broadcastChannel.removeEventListener('message', handler);
+          broadcastChannel.removeEventListener('message', managed.broadcastHandler);
+        } catch (e) {
+          // ignore
+        }
+        managed.broadcastHandler = undefined;
+      }
+      if (managed.channel) {
+        try {
+          supabase.removeChannel(managed.channel);
+        } catch (err) {
+          console.warn('Error removing session Supabase channel:', err);
+        }
+        managed.channel = null;
+      }
+      this.managedSessions.delete(sessionId);
+    }
+  }
+
+  // Explicit session cleanup
+  cleanupSession(sessionId: string) {
+    const cleanId = (sessionId || '').trim();
+    const managed = this.managedSessions.get(cleanId);
+    if (managed) {
+      if (managed.reconnectTimeout) clearTimeout(managed.reconnectTimeout);
+      if (managed.broadcastHandler && broadcastChannel) {
+        try {
+          broadcastChannel.removeEventListener('message', managed.broadcastHandler);
         } catch (e) {
           // ignore
         }
       }
-    };
+      if (managed.channel) {
+        try {
+          supabase.removeChannel(managed.channel);
+        } catch (e) {
+          // ignore
+        }
+        managed.channel = null;
+      }
+      managed.listeners.clear();
+      this.managedSessions.delete(cleanId);
+    }
+  }
+
+  // Master cleanup for leaving tables, switching rooms, or ErrorBoundary recovery
+  cleanupAllSubscriptions() {
+    // Teardown all room channels
+    for (const [roomId, managed] of this.managedRooms.entries()) {
+      if (managed.reconnectTimeout) clearTimeout(managed.reconnectTimeout);
+      if (managed.broadcastHandler && broadcastChannel) {
+        try {
+          broadcastChannel.removeEventListener('message', managed.broadcastHandler);
+        } catch (e) {
+          // ignore
+        }
+      }
+      if (managed.channel) {
+        try {
+          supabase.removeChannel(managed.channel);
+        } catch (e) {
+          // ignore
+        }
+        managed.channel = null;
+      }
+      managed.listeners.clear();
+    }
+    this.managedRooms.clear();
+
+    // Teardown all session channels
+    for (const [sessionId, managed] of this.managedSessions.entries()) {
+      if (managed.reconnectTimeout) clearTimeout(managed.reconnectTimeout);
+      if (managed.broadcastHandler && broadcastChannel) {
+        try {
+          broadcastChannel.removeEventListener('message', managed.broadcastHandler);
+        } catch (e) {
+          // ignore
+        }
+      }
+      if (managed.channel) {
+        try {
+          supabase.removeChannel(managed.channel);
+        } catch (e) {
+          // ignore
+        }
+        managed.channel = null;
+      }
+      managed.listeners.clear();
+    }
+    this.managedSessions.clear();
+
+    // Clean up any other open channels on the client
+    try {
+      const channels = supabase.getChannels();
+      for (const ch of channels) {
+        try {
+          supabase.removeChannel(ch);
+        } catch (e) {
+          // ignore
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
   }
 
   // 7. Leaderboards & Record Result
