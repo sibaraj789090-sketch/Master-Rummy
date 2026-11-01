@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { sounds } from '../../utils/sound';
 import { ShieldCheck, Lock, Award, Wifi, Sparkles, ChevronRight } from 'lucide-react';
+import { splashScreenService } from '../../services/splashScreenService';
 
 interface AppLoadingScreenProps {
   onComplete: () => void;
@@ -20,6 +21,14 @@ export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({ onComplete, 
   const [progress, setProgress] = useState(0);
   const [currentStageText, setCurrentStageText] = useState('Initializing Master Rummy...');
   const [isFadingOut, setIsFadingOut] = useState(false);
+  const [bgUrl, setBgUrl] = useState<string | null>(() => splashScreenService.getCacheBustedUrl());
+
+  useEffect(() => {
+    const unsub = splashScreenService.subscribe(() => {
+      setBgUrl(splashScreenService.getCacheBustedUrl());
+    });
+    return () => unsub();
+  }, []);
 
   useEffect(() => {
     let current = 0;
@@ -69,17 +78,30 @@ export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({ onComplete, 
         background: 'radial-gradient(circle at 50% 35%, #690a14 0%, #40040a 55%, #1f0104 100%)',
       }}
     >
-      {/* Decorative Floating Card Suits Background */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none opacity-15">
-        <span className="absolute top-[12%] left-[10%] text-6xl text-amber-300 animate-pulse">♠</span>
-        <span className="absolute top-[22%] right-[14%] text-7xl text-red-400 animate-pulse">♥</span>
-        <span className="absolute bottom-[28%] left-[15%] text-7xl text-red-400 animate-pulse">♦</span>
-        <span className="absolute bottom-[20%] right-[12%] text-6xl text-amber-300 animate-pulse">♣</span>
-        <span className="absolute top-[48%] left-[6%] text-4xl text-amber-200">★</span>
-        <span className="absolute top-[40%] right-[8%] text-5xl text-amber-200">★</span>
-        {/* Shimmering diagonal light sweep */}
-        <div className="absolute -inset-full bg-gradient-to-r from-transparent via-amber-400/5 to-transparent rotate-45 animate-pulse" />
-      </div>
+      {/* Dynamic Splash Background from Admin Panel */}
+      {bgUrl ? (
+        <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
+          <img
+            src={bgUrl}
+            alt="Master Rummy Splash Background"
+            className="w-full h-full object-cover object-center scale-100"
+          />
+          {/* Multi-layer subtle dark overlay preserving high legibility of logo, loading bar & text */}
+          <div className="absolute inset-0 bg-black/45 backdrop-brightness-95" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-black/65" />
+        </div>
+      ) : (
+        /* Decorative Floating Card Suits Background for Default Theme */
+        <div className="absolute inset-0 overflow-hidden pointer-events-none opacity-15">
+          <span className="absolute top-[12%] left-[10%] text-6xl text-amber-300 animate-pulse">♠</span>
+          <span className="absolute top-[22%] right-[14%] text-7xl text-red-400 animate-pulse">♥</span>
+          <span className="absolute bottom-[28%] left-[15%] text-7xl text-red-400 animate-pulse">♦</span>
+          <span className="absolute bottom-[20%] right-[12%] text-6xl text-amber-300 animate-pulse">♣</span>
+          <span className="absolute top-[48%] left-[6%] text-4xl text-amber-200">★</span>
+          <span className="absolute top-[40%] right-[8%] text-5xl text-amber-200">★</span>
+          <div className="absolute -inset-full bg-gradient-to-r from-transparent via-amber-400/5 to-transparent rotate-45 animate-pulse" />
+        </div>
+      )}
 
       {/* Top Header Row with Skip & Ping */}
       <div className="w-full max-w-md px-6 pt-6 flex items-center justify-between z-10">

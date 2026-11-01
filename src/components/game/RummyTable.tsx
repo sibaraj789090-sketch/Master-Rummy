@@ -31,7 +31,8 @@ import {
   getRandomBotChat,
 } from '../../utils/botEngine';
 import { sounds } from '../../utils/sound';
-import { triggerWinConfetti, triggerRoundWinConfetti } from '../../utils/confetti';
+import { triggerWinConfetti, triggerRoundWinConfetti, triggerInteractivePopper, triggerCoinShower } from '../../utils/confetti';
+import { CelebrationVictoryModal } from './CelebrationVictoryModal';
 import {
   Menu,
   FileText,
@@ -3681,6 +3682,19 @@ export const RummyTable: React.FC = () => {
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-fade-in">
             <div className="bg-gradient-to-b from-[#6b0b14] via-[#850d18] to-[#45050b] border-2 border-amber-300 text-white rounded-3xl max-w-md w-full p-5 shadow-2xl space-y-4">
               <div className="text-center">
+                {roundCompleteModalData.isPlayerWinner && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      sounds.playCoinSound();
+                      triggerRoundWinConfetti();
+                    }}
+                    className="w-12 h-12 mx-auto mb-2 rounded-full bg-gradient-to-tr from-amber-400 to-yellow-300 text-stone-950 flex items-center justify-center text-xl shadow-lg border-2 border-amber-200 cursor-pointer active:scale-95 transition-transform animate-bounce"
+                    title="Tap to celebrate!"
+                  >
+                    🏆
+                  </button>
+                )}
                 <span className="text-[10px] font-black uppercase tracking-widest text-amber-300">
                   {gameVariant === 'Deals'
                     ? `DEAL ${roundCompleteModalData.deal} OF ${modeConfig.totalDeals} COMPLETED`
@@ -3688,7 +3702,7 @@ export const RummyTable: React.FC = () => {
                 </span>
                 <h2 className="text-xl font-black text-white mt-0.5">
                   {roundCompleteModalData.isPlayerWinner
-                    ? 'YOU WON THIS HAND!'
+                    ? 'YOU WON THIS HAND! 👑'
                     : `${roundCompleteModalData.winnerName} WON!`}
                 </h2>
               </div>
@@ -3774,77 +3788,28 @@ export const RummyTable: React.FC = () => {
           </div>
         )}
 
-        {/* TABLE CHAMPION / FINAL WINNER MODAL */}
+        {/* TABLE CHAMPION / FINAL WINNER CELEBRATION MODAL */}
         {winModalData && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-fade-in">
-            <div className="bg-gradient-to-b from-[#6b0b14] via-[#850d18] to-[#45050b] text-white rounded-3xl max-w-sm w-full p-6 text-center border-2 border-amber-300 shadow-2xl space-y-4">
-              <button
-                type="button"
-                onClick={() => triggerWinConfetti()}
-                title="Celebrate!"
-                className="w-16 h-16 mx-auto rounded-full bg-amber-400 hover:bg-amber-300 text-amber-950 flex items-center justify-center text-3xl shadow-xl animate-bounce cursor-pointer active:scale-95 transition-transform ring-4 ring-amber-300/50"
-              >
-                🏆
-              </button>
-
-              <div>
-                <span className="text-[11px] font-extrabold uppercase tracking-widest text-amber-300">
-                  {winModalData.title}
-                </span>
-                <h2 className="text-2xl font-black text-white mt-1">
-                  {winModalData.isPlayer ? 'YOU WON!' : `${winModalData.winnerName} WON!`}
-                </h2>
-                <div className="mt-2 inline-flex items-center gap-1.5 bg-black/40 px-4 py-1.5 rounded-full border border-amber-400/40 text-lg font-black text-amber-300">
-                  <span>Prize: ₹{winModalData.prize.toFixed(2)}</span>
-                </div>
-              </div>
-
-              {/* Final Breakdown */}
-              <div className="bg-black/40 rounded-xl p-3 border border-stone-800 text-xs space-y-1.5 text-left">
-                {winModalData.breakdown.map((b, idx) => (
-                  <div key={idx} className="flex justify-between items-center text-stone-200">
-                    <span className="font-semibold truncate max-w-[150px]">
-                      {b.rank ? `#${b.rank} ` : ''}{b.name}
-                    </span>
-                    <div className="flex items-center gap-3">
-                      <span className="font-mono text-stone-400">{b.score} pts</span>
-                      {b.won > 0 && (
-                        <span className="font-mono font-bold text-emerald-400">+₹{b.won.toFixed(2)}</span>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="pt-2 flex gap-2">
-                <button
-                  onClick={() => {
-                    sounds.playCardClick();
-                    setWinModalData(null);
-                    initRoundDealing(1, 1);
-                    setCurrentRound(1);
-                    setCurrentDeal(1);
-                    setUserCumulativeScore(0);
-                    setUserDealScores([]);
-                    setPlayerEliminated(false);
-                  }}
-                  className="flex-1 py-3 bg-gradient-to-r from-amber-500 to-yellow-400 text-stone-950 font-black text-xs rounded-xl shadow-lg active:scale-95 transition-all"
-                >
-                  PLAY AGAIN
-                </button>
-                <button
-                  onClick={() => {
-                    sounds.playCardClick();
-                    setWinModalData(null);
-                    exitGame();
-                  }}
-                  className="flex-1 py-3 bg-black/40 hover:bg-black/60 text-white font-extrabold text-xs rounded-xl border border-white/20 active:scale-95 transition-all"
-                >
-                  LOBBY
-                </button>
-              </div>
-            </div>
-          </div>
+          <CelebrationVictoryModal
+            title={winModalData.title}
+            winnerName={winModalData.winnerName}
+            isPlayerWinner={winModalData.isPlayer}
+            prize={winModalData.prize}
+            breakdown={winModalData.breakdown}
+            onPlayAgain={() => {
+              setWinModalData(null);
+              initRoundDealing(1, 1);
+              setCurrentRound(1);
+              setCurrentDeal(1);
+              setUserCumulativeScore(0);
+              setUserDealScores([]);
+              setPlayerEliminated(false);
+            }}
+            onReturnToLobby={() => {
+              setWinModalData(null);
+              exitGame();
+            }}
+          />
         )}
 
         {/* 6. SCORE WINDOW Modal */}

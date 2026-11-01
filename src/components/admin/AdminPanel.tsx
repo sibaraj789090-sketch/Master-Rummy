@@ -43,8 +43,10 @@ import {
   AlertCircle,
   Sparkles,
   Cpu,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { BotManagementPanel } from './BotManagementPanel';
+import { SplashScreenManagementPanel } from './SplashScreenManagementPanel';
 import { sounds } from '../../utils/sound';
 import {
   supabase,
@@ -109,7 +111,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onSwitchToPlayer }) => {
 
   // Main Tabs Navigation
   const [activeTab, setActiveTab] = useState<
-    'OVERVIEW' | 'BOTS_CONTROL' | 'LIVE_GAMES' | 'ADD_CASH' | 'WITHDRAWALS' | 'USERS' | 'KYC_DOCS' | 'SUPABASE' | 'TOURNAMENTS' | 'SETTINGS'
+    'OVERVIEW' | 'BOTS_CONTROL' | 'LIVE_GAMES' | 'ADD_CASH' | 'WITHDRAWALS' | 'USERS' | 'KYC_DOCS' | 'SUPABASE' | 'TOURNAMENTS' | 'SPLASH_SCREEN' | 'SETTINGS'
   >('OVERVIEW');
 
   // Hard gatekeeper for admin permissions
@@ -651,6 +653,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onSwitchToPlayer }) => {
         >
           <Trophy className="w-4 h-4" />
           <span>Tournaments</span>
+        </button>
+
+        <button
+          onClick={() => {
+            sounds.playCardClick();
+            setActiveTab('SPLASH_SCREEN');
+          }}
+          className={`py-3 px-3.5 flex items-center gap-2 text-xs font-bold transition-colors border-b-2 whitespace-nowrap ${
+            activeTab === 'SPLASH_SCREEN'
+              ? 'border-amber-400 text-amber-300'
+              : 'border-transparent text-stone-400 hover:text-stone-200'
+          }`}
+        >
+          <ImageIcon className="w-4 h-4" />
+          <span>Splash Screen</span>
         </button>
 
         <button
@@ -2786,6 +2803,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onSwitchToPlayer }) => {
             </div>
           </div>
         )}
+
+        {/* ============================================================== */}
+        {/* TAB: DYNAMIC SPLASH SCREEN BACKGROUND MANAGEMENT */}
+        {/* ============================================================== */}
+        {activeTab === 'SPLASH_SCREEN' && <SplashScreenManagementPanel />}
       </main>
     </div>
   );

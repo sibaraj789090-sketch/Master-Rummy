@@ -92,6 +92,27 @@ class SoundController {
     });
   }
 
+  playJackpotCascade() {
+    const ctx = this.getContext();
+    if (!ctx) return;
+    const notes = [523.25, 659.25, 783.99, 1046.5, 1318.51, 1567.98, 2093.0]; // C5 up to C7 sparkling arpeggio
+    notes.forEach((freq, idx) => {
+      setTimeout(() => {
+        if (!this.enabled || !this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+        gain.gain.setValueAtTime(0.16, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.32);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start();
+        osc.stop(this.ctx.currentTime + 0.33);
+      }, idx * 70);
+    });
+  }
+
   playBell() {
     const ctx = this.getContext();
     if (!ctx) return;
